@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Scraped literature data and transient files
+papers_data/
+*.log
+day2_prompt.txt
+test_tool.txt
+*dump.txt
+
+# OS and Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Virtual environments
+venv/
+env/
+.env
+
+# Benchmark output files (optional: keep directory)
+# benchmarks/*.csv
+
+# Database files (optional: comment out if fresh DB is preferred)
+database/*.db
+database/*.db-journal

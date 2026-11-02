@@ -1,0 +1,9 @@
+# Requirements for Hybrid BB84 QKD + AES-256-GCM IoT Security Prototype
+qiskit>=2.0.0
+qiskit-aer>=0.18.0
+cryptography>=42.0.0
+paho-mqtt>=2.0.0
+flask>=3.0.0
+psutil>=5.9.0
+matplotlib>=3.8.0
+

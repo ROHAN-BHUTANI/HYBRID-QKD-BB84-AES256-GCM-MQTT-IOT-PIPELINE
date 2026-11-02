@@ -1,0 +1,4 @@
+payload_bytes,repetitions,avg_encryption_ms,min_encryption_ms,max_encryption_ms
+64,20,0.1623,0.0041,3.0904
+256,20,0.0144,0.0114,0.0407
+1024,20,0.0097,0.0052,0.042

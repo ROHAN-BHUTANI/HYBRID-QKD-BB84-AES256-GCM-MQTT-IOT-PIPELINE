@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quantum-Secured IoT Cloud Dashboard | Hybrid BB84 + AES-256-GCM</title>
+    <!-- Bootstrap 5 & Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+
+    <style>
+        :root {
+            --bg-canvas: #070709;
+            --bg-surface: #101014;
+            --bg-card: #15151c;
+            --bg-card-hover: #1c1c26;
+            --border-subtle: #272635;
+            --border-gold: #c69214;
+            --border-gold-glow: rgba(212, 175, 55, 0.45);
+            
+            --gold-primary: #f59e0b;
+            --gold-light: #fbbf24;
+            --gold-metallic: #d4af37;
+            --gold-bright: #fde047;
+            --gold-glow: 0 0 20px rgba(245, 158, 11, 0.25);
+            
+            --neon-green: #10b981;
+            --neon-red: #ef4444;
+            --neon-cyan: #06b6d4;
+            
+            --text-heading: #ffffff;
+            --text-gold: #fbbf24;
+            --text-body: #cbd5e1;
+            --text-muted: #94a3b8;
+        }
+
+        body {
+            background-color: var(--bg-canvas);
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(212, 175, 55, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 85% 85%, rgba(245, 158, 11, 0.05) 0%, transparent 45%);
+            color: var(--text-body);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            min-height: 100vh;
+            padding-bottom: 60px;
+        }
+
+        /* Gold Gradient Headers & Accent Text */
+        .gold-gradient-text {
+            background: linear-gradient(135deg, #fff7d6 0%, #f59e0b 50%, #d97706 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .gold-brand-border {
+            border-bottom: 2px solid var(--border-gold);
+            box-shadow: 0 4px 20px rgba(212, 175, 55, 0.15);
+        }
+
+        /* Navbar */
+        .navbar-custom {
+            background-color: rgba(12, 12, 16, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-gold);
+        }
+
+        /* Cards */
+        .card-custom {
+            background: linear-gradient(180deg, rgba(26, 26, 36, 0.9) 0%, rgba(18, 18, 25, 0.95) 100%);
+            border: 1px solid var(--border-subtle);
+            border-radius: 14px;
+            transition: all 0.25s ease-in-out;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+
+        .card-custom:hover {
+            border-color: var(--border-gold);
+            box-shadow: var(--gold-glow);
+            transform: translateY(-2px);
+        }
+
+        .card-header-gold {
+            background: rgba(212, 175, 55, 0.06);
+            border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+            color: var(--gold-light);
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+        }
+
+        /* KPI Values */
+        .kpi-number {
+            font-size: 2.25rem;
+            font-weight: 800;
+            line-height: 1.1;
+            letter-spacing: -0.5px;
+        }
+
+        /* Badges */
+        .badge-gold {
+            background: linear-gradient(135deg, rgba(212, 175, 55, 0.2) 0%, rgba(245, 158, 11, 0.3) 100%);
+            color: var(--gold-bright);
+            border: 1px solid var(--border-gold);
+            font-weight: 700;
+            padding: 6px 12px;
+            border-radius: 8px;
+        }
+
+        .badge-verified {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid #059669;
+            font-weight: 700;
+            padding: 5px 10px;
+            border-radius: 6px;
+        }
+
+        .badge-danger-alert {
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+            border: 1px solid #dc2626;
+            font-weight: 700;
+            padding: 5px 10px;
+            border-radius: 6px;
+        }
+
+        /* Architecture Flow Pills */
+        .flow-pill {
+            background: rgba(18, 18, 26, 0.9);
+            border: 1px solid var(--border-gold);
+            color: #fef08a;
+            border-radius: 10px;
+            padding: 10px 14px;
+            text-align: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+            flex: 1;
+            min-width: 140px;
+        }
+
+        .flow-pill strong {
+            display: block;
+            font-size: 0.85rem;
+            color: #ffffff;
+        }
+
+        .flow-pill span {
+            font-size: 0.72rem;
+            color: var(--gold-light);
+        }
+
+        /* Interactive Action Buttons */
+        .btn-gold {
+            background: linear-gradient(135deg, #d4af37 0%, #f59e0b 100%);
+            color: #000000;
+            font-weight: 800;
+            border: none;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+        }
+
+        .btn-gold:hover {
+            background: linear-gradient(135deg, #fde047 0%, #fbbf24 100%);
+            color: #000000;
+            box-shadow: 0 6px 20px rgba(245, 158, 11, 0.5);
+            transform: translateY(-1px);
+        }
+
+        .btn-outline-gold {
+            background: transparent;
+            color: var(--gold-light);
+            border: 1px solid var(--border-gold);
+            font-weight: 700;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-outline-gold:hover {
+            background: rgba(212, 175, 55, 0.15);
+            color: #ffffff;
+            border-color: #fde047;
+        }
+
+        .btn-eve {
+            background: linear-gradient(135deg, #78350f 0%, #b45309 100%);
+            color: #fef08a;
+            font-weight: 800;
+            border: 1px solid #f59e0b;
+            border-radius: 8px;
+        }
+
+        .btn-eve:hover {
+            background: linear-gradient(135deg, #b45309 0%, #d97706 100%);
+            color: #ffffff;
+            box-shadow: 0 4px 15px rgba(180, 83, 9, 0.4);
+        }
+
+        /* Definitions Section */
+        .def-card {
+            background: rgba(18, 18, 24, 0.6);
+            border-left: 3px solid var(--gold-primary);
+            padding: 12px 16px;
+            margin-bottom: 12px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .def-card strong {
+            color: #ffffff;
+            font-size: 0.92rem;
+            display: inline-block;
+            margin-bottom: 2px;
+        }
+
+        .def-card p {
+            margin: 0;
+            font-size: 0.82rem;
+            color: var(--text-body);
+        }
+
+        /* Custom Table */
+        .table-custom {
+            --bs-table-bg: transparent;
+            --bs-table-color: var(--text-body);
+            border-color: var(--border-subtle);
+        }
+
+        .table-custom th {
+            color: var(--gold-light);
+            font-weight: 800;
+            text-transform: uppercase;
+            font-size: 0.78rem;
+            border-bottom: 2px solid var(--border-gold);
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .table-custom td {
+            vertical-align: middle;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        /* Pulse Dot */
+        .pulse-gold {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #fbbf24;
+            box-shadow: 0 0 0 rgba(251, 191, 36, 0.7);
+            animation: pulse 1.8s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.7); }
+            70% { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Top Navigation Bar -->
+<nav class="navbar navbar-custom py-3 mb-4 gold-brand-border">
+    <div class="container-fluid px-4">
+        <div class="d-flex align-items-center gap-3">
+            <div style="background: rgba(212, 175, 55, 0.15); border: 1px solid var(--border-gold); border-radius: 10px; padding: 8px 12px;">
+                <i class="bi bi-shield-lock-fill text-warning fs-3"></i>
+            </div>
+            <div>
+                <h4 class="mb-0 fw-bold gold-gradient-text">
+                    HYBRID BB84 QKD + AES-256-GCM IOT DASHBOARD
+                </h4>
+                <div class="text-muted fw-semibold" style="font-size: 0.78rem; letter-spacing: 0.4px;">
+                    <strong>PROJECT TEAM ID: MP2026CSE205</strong> | <strong>GRAPHIC ERA DEEMED TO BE UNIVERSITY</strong> | SUPERVISOR: <strong>PROF. (DR.) MOHAMMAD WAZID</strong>
+                </div>
+            </div>
+        </div>
+        <div class="d-flex align-items-center gap-3">
+            <span class="badge-gold d-flex align-items-center gap-2">
+                <span class="pulse-gold"></span>
+                <span>ACTIVE AES KEY: <code class="text-warning fw-bold" id="activeKeyBadge">INITIALIZING...</code></span>
+            </span>
+            <span class="badge bg-dark border border-secondary text-light py-2 px-3 fw-bold">
+                <i class="bi bi-broadcast text-warning"></i> MQTT ENGINE: <strong>SIMULATED/PAHO</strong>
+            </span>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid px-4">
+
+    <!-- Section 1: End-to-End Cryptographic Architecture Banner -->
+    <div class="card card-custom mb-4">
+        <div class="card-header card-header-gold d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-diagram-3-fill text-warning"></i> <strong>End-to-End Quantum-Secured Telemetry Architecture</strong></span>
+            <span class="badge bg-black text-warning border border-warning" style="font-size: 0.7rem;"><strong>ISO/IEC 18033 & NIST SP 800-38D</strong></span>
+        </div>
+        <div class="card-body py-3">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <div class="flow-pill">
+                    <i class="bi bi-cpu-fill text-warning fs-5"></i>
+                    <strong>1. Qiskit BB84 Sim</strong>
+                    <span>512 Single-Photons</span>
+                </div>
+                <i class="bi bi-chevron-right text-warning fs-5"></i>
+                <div class="flow-pill">
+                    <i class="bi bi-percent text-warning fs-5"></i>
+                    <strong>2. Sifting & QBER</strong>
+                    <span>Threshold &le; 11% Cutoff</span>
+                </div>
+                <i class="bi bi-chevron-right text-warning fs-5"></i>
+                <div class="flow-pill">
+                    <i class="bi bi-hash text-warning fs-5"></i>
+                    <strong>3. SHA-256 KDF</strong>
+                    <span>256-bit Key Derived</span>
+                </div>
+                <i class="bi bi-chevron-right text-warning fs-5"></i>
+                <div class="flow-pill">
+                    <i class="bi bi-lock-fill text-warning fs-5"></i>
+                    <strong>4. IoT AES-256-GCM</strong>
+                    <span>96-bit Unique Nonce</span>
+                </div>
+                <i class="bi bi-chevron-right text-warning fs-5"></i>
+                <div class="flow-pill">
+                    <i class="bi bi-send-fill text-warning fs-5"></i>
+                    <strong>5. MQTT Broker</strong>
+                    <span>Topic: iot/secure/data</span>
+                </div>
+                <i class="bi bi-chevron-right text-warning fs-5"></i>
+                <div class="flow-pill">
+                    <i class="bi bi-cloud-check-fill text-warning fs-5"></i>
+                    <strong>6. Cloud Receiver & DB</strong>
+                    <span>Tag Verify & SQLite</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 2: Key Performance Indicators (KPI Cards) -->
+    <div class="row g-3 mb-4">
+        <!-- KPI 1: Authenticated Packets -->
+        <div class="col-xl-3 col-md-6">
+            <div class="card card-custom h-100" style="border-left: 4px solid var(--neon-green);">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="text-muted fw-bold small text-uppercase"><strong>Authenticated Packets</strong></div>
+                            <div class="kpi-number text-white mt-1" id="kpiAuth">0</div>
+                        </div>
+                        <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid var(--neon-green); border-radius: 10px; padding: 10px;">
+                            <i class="bi bi-patch-check-fill text-success fs-4"></i>
+                        </div>
+                    </div>
+                    <div class="mt-2 text-muted small">
+                        <strong>Status:</strong> <span class="text-success fw-bold">128-bit MAC Integrity Verified</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPI 2: Tamper / MitM Alerts -->
+        <div class="col-xl-3 col-md-6">
+            <div class="card card-custom h-100" style="border-left: 4px solid var(--neon-red);">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="text-muted fw-bold small text-uppercase"><strong>MitM Tamper Rejections</strong></div>
+                            <div class="kpi-number text-danger mt-1" id="kpiTamper">0</div>
+                        </div>
+                        <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid var(--neon-red); border-radius: 10px; padding: 10px;">
+                            <i class="bi bi-shield-slash-fill text-danger fs-4"></i>
+                        </div>
+                    </div>
+                    <div class="mt-2 text-muted small">
+                        <strong>Security:</strong> <span class="text-danger fw-bold">Tampered Payloads Dropped</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPI 3: AES-256-GCM Latency -->
+        <div class="col-xl-3 col-md-6">
+            <div class="card card-custom h-100" style="border-left: 4px solid var(--gold-primary);">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="text-muted fw-bold small text-uppercase"><strong>Avg Decryption Overhead</strong></div>
+                            <div class="kpi-number text-warning mt-1"><span id="kpiDecLatency">0.000</span> <span style="font-size: 1.1rem; font-weight: 600;">ms</span></div>
+                        </div>
+                        <div style="background: rgba(245, 158, 11, 0.15); border: 1px solid var(--border-gold); border-radius: 10px; padding: 10px;">
+                            <i class="bi bi-lightning-charge-fill text-warning fs-4"></i>
+                        </div>
+                    </div>
+                    <div class="mt-2 text-muted small">
+                        <strong>Throughput:</strong> <span class="text-warning fw-bold">Sub-Millisecond Cloud Ingestion</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPI 4: Latest BB84 QBER -->
+        <div class="col-xl-3 col-md-6">
+            <div class="card card-custom h-100" style="border-left: 4px solid var(--gold-light);">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="text-muted fw-bold small text-uppercase"><strong>Latest BB84 QBER</strong></div>
+                            <div class="kpi-number mt-1" id="kpiQberContainer"><span id="kpiQber" class="text-white">0.00</span><span style="font-size: 1.1rem;">%</span></div>
+                        </div>
+                        <div style="background: rgba(251, 191, 36, 0.15); border: 1px solid var(--gold-light); border-radius: 10px; padding: 10px;">
+                            <i class="bi bi-radar text-warning fs-4"></i>
+                        </div>
+                    </div>
+                    <div class="mt-2 small" id="kpiEveStatus">
+                        <strong>Channel Status:</strong> <span class="text-success fw-bold">Clean Quantum Channel</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 3: Interactive Simulation Controls -->
+    <div class="card card-custom mb-4">
+        <div class="card-header card-header-gold d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-sliders2-vertical text-warning"></i> <strong>Interactive Cryptographic Experimentation Console</strong></span>
+            <span class="text-muted small"><strong>Click to trigger quantum protocol execution or live telemetry attacks</strong></span>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-lg-3 col-md-6">
+                    <button class="btn btn-gold w-100 py-3 d-flex align-items-center justify-content-center gap-2" onclick="triggerQKD(false)">
+                        <i class="bi bi-key-fill fs-5"></i>
+                        <span><strong>Run BB84 (Clean Channel)</strong></span>
+                    </button>
+                    <div class="text-muted small text-center mt-2">
+                        <strong>Simulates:</strong> Qiskit 512 qubits (Alice & Bob match, <strong>QBER &approx; 0% &le; 11%</strong>)
+                    </div>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <button class="btn btn-eve w-100 py-3 d-flex align-items-center justify-content-center gap-2" onclick="triggerQKD(true)">
+                        <i class="bi bi-eye-slash-fill fs-5"></i>
+                        <span><strong>Run BB84 (Under Eve Attack)</strong></span>
+                    </button>
+                    <div class="text-muted small text-center mt-2">
+                        <strong>Simulates:</strong> Intercept-resend attack (<strong>QBER &approx; 25% &gt; 11% &rarr; Key Abort</strong>)
+                    </div>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <button class="btn btn-outline-gold w-100 py-3 d-flex align-items-center justify-content-center gap-2" onclick="triggerSensor(false)">
+                        <i class="bi bi-send-check-fill text-success fs-5"></i>
+                        <span><strong>Transmit Valid Telemetry</strong></span>
+                    </button>
+                    <div class="text-muted small text-center mt-2">
+                        <strong>Simulates:</strong> BME280 sensor &rarr; <strong>AES-256-GCM</strong> &rarr; MQTT &rarr; Verified
+                    </div>
+                </div>
+                <div class="col-lg-3 col-md-6">
+                    <button class="btn btn-outline-danger w-100 py-3 d-flex align-items-center justify-content-center gap-2" onclick="triggerSensor(true)">
+                        <i class="bi bi-bug-fill text-danger fs-5"></i>
+                        <span><strong>Inject MitM Tampering</strong></span>
+                    </button>
+                    <div class="text-muted small text-center mt-2">
+                        <strong>Simulates:</strong> Ciphertext flip in transit &rarr; <strong>Tag Mismatch &rarr; Alert</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-time status notification box -->
+            <div id="actionStatus" class="alert mt-3 mb-0 py-2 d-none fw-semibold"></div>
+        </div>
+    </div>
+
+    <!-- Section 4: Academic Definitions & Real-Time Sensor Telemetry -->
+    <div class="row g-4 mb-4">
+        <!-- Live Environmental Telemetry Feed -->
+        <div class="col-xl-8">
+            <div class="card card-custom h-100">
+                <div class="card-header card-header-gold d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-table text-warning"></i> <strong>Decrypted IoT Sensor Telemetry Stream</strong></span>
+                    <button class="btn btn-sm btn-outline-gold" onclick="refreshData()">
+                        <i class="bi bi-arrow-clockwise"></i> <strong>Refresh</strong>
+                    </button>
+                </div>
+                <div class="card-body p-0 table-responsive" style="max-height: 480px;">
+                    <table class="table table-custom table-hover mb-0 text-center">
+                        <thead>
+                            <tr>
+                                <th><strong>Seq #</strong></th>
+                                <th><strong>Device Node</strong></th>
+                                <th><strong>Temperature</strong></th>
+                                <th><strong>Humidity</strong></th>
+                                <th><strong>Pressure</strong></th>
+                                <th><strong>Authentication</strong></th>
+                                <th><strong>Dec. Time</strong></th>
+                                <th><strong>E2E Lag</strong></th>
+                            </tr>
+                        </thead>
+                        <tbody id="readingsTableBody">
+                            <tr>
+                                <td colspan="8" class="text-center py-4 text-muted"><strong>Loading telemetry stream...</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Academic Definitions & Security Architecture -->
+        <div class="col-xl-4">
+            <div class="card card-custom h-100">
+                <div class="card-header card-header-gold">
+                    <i class="bi bi-book-half text-warning"></i> <strong>Cryptographic Definitions & Standards</strong>
+                </div>
+                <div class="card-body p-3" style="max-height: 480px; overflow-y: auto;">
+                    <div class="def-card">
+                        <strong>BB84 Quantum Key Distribution:</strong>
+                        <p><strong>Single-photon state preparation</strong> in non-orthogonal conjugate bases ($+$ rectilinear, $\times$ diagonal) enabling information-theoretic secret key agreement.</p>
+                    </div>
+
+                    <div class="def-card">
+                        <strong>Quantum Bit Error Rate (QBER):</strong>
+                        <p><strong>The fundamental error detection metric:</strong> $QBER = \frac{Errors}{Sample\ Size}$. A measured error rate exceeding <strong>11%</strong> proves channel eavesdropping, triggering an instant abort.</p>
+                    </div>
+
+                    <div class="def-card">
+                        <strong>SHA-256 Privacy Amplification (KDF):</strong>
+                        <p><strong>Hash extraction function</strong> that eliminates partial eavesdropper information and condenses raw sifted bits into a cryptographically uniform <strong>256-bit symmetric AES key</strong>.</p>
+                    </div>
+
+                    <div class="def-card">
+                        <strong>AES-256-GCM Authenticated Encryption:</strong>
+                        <p><strong>NIST SP 800-38D standard</strong> providing both 256-bit confidentiality and 128-bit authentication tag verification with unique <strong>96-bit nonces</strong> to eliminate replay attacks.</p>
+                    </div>
+
+                    <div class="def-card">
+                        <strong>MQTT Lightweight Messaging:</strong>
+                        <p><strong>OASIS publish/subscribe protocol</strong> suited for constrained IoT microcontrollers, transmitting encrypted envelopes to the cloud receiver.</p>
+                    </div>
+
+                    <div class="def-card">
+                        <strong>MitM Tamper Protection:</strong>
+                        <p><strong>Galois Message Authentication Code (GMAC)</strong> ensures any bit altered in transit by an adversary fails authentication tag verification with probability $1 - 2^{-128}$.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 5: Security Audit Log & Diagnostics -->
+    <div class="row g-4">
+        <!-- Security Audit Log -->
+        <div class="col-xl-6">
+            <div class="card card-custom h-100">
+                <div class="card-header card-header-gold d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-shield-exclamation text-danger"></i> <strong>Intrusion Detection & Tamper Audit Log</strong></span>
+                    <span class="badge bg-danger" id="alertCountBadge"><strong>0 ALERTS</strong></span>
+                </div>
+                <div class="card-body p-0 table-responsive" style="max-height: 300px;">
+                    <ul class="list-group list-group-flush bg-transparent" id="alertsList">
+                        <li class="list-group-item bg-transparent text-muted py-3 text-center"><strong>No integrity violations logged.</strong></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Diagnostic Specifications -->
+        <div class="col-xl-6">
+            <div class="card card-custom h-100">
+                <div class="card-header card-header-gold">
+                    <i class="bi bi-info-circle-fill text-warning"></i> <strong>Prototype Specifications & Benchmark Status</strong>
+                </div>
+                <div class="card-body p-3">
+                    <div class="row g-2 text-muted small">
+                        <div class="col-6"><strong>Quantum Backend:</strong> <span class="text-white">IBM Qiskit Aer 0.18.2</span></div>
+                        <div class="col-6"><strong>Cipher Mode:</strong> <span class="text-white">AES-256-GCM (128-bit Tag)</span></div>
+                        <div class="col-6"><strong>Initial Qubits ($N$):</strong> <span class="text-white">512 Photons</span></div>
+                        <div class="col-6"><strong>Nonce Size:</strong> <span class="text-white">96 bits (Cryptographically Unique)</span></div>
+                        <div class="col-6"><strong>QBER Abort Threshold:</strong> <span class="text-white">11.0% (Theoretical Standard)</span></div>
+                        <div class="col-6"><strong>Transport Protocol:</strong> <span class="text-white">MQTT 5.0 / Paho (Topic: iot/secure/data)</span></div>
+                        <div class="col-6"><strong>KDF Privacy Amplification:</strong> <span class="text-white">SHA-256 (32 Bytes Output)</span></div>
+                        <div class="col-6"><strong>Storage Engine:</strong> <span class="text-white">SQLite3 (iot_cloud.db)</span></div>
+                    </div>
+                    <hr class="border-secondary my-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-warning small"><strong>Benchmark Evaluation Files:</strong></span>
+                        <div class="d-flex gap-2">
+                            <span class="badge bg-dark border border-warning text-warning">qkd_benchmark.csv</span>
+                            <span class="badge bg-dark border border-warning text-warning">encryption_benchmark.csv</span>
+                            <span class="badge bg-dark border border-warning text-warning">e2e_latency.csv</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Real-Time Client JavaScript -->
+<script>
+    async function fetchStats() {
+        try {
+            const res = await fetch('/api/stats');
+            const data = await res.json();
+            
+            document.getElementById('kpiAuth').innerText = data.summary.authenticated_packets;
+            document.getElementById('kpiTamper').innerText = data.summary.tampered_packets;
+            document.getElementById('kpiDecLatency').innerText = data.summary.avg_decryption_ms.toFixed(3);
+            document.getElementById('activeKeyBadge').innerText = data.active_key_preview;
+            
+            if (data.latest_qkd) {
+                const qberPct = (data.latest_qkd.qber * 100).toFixed(2);
+                const qberElem = document.getElementById('kpiQber');
+                qberElem.innerText = qberPct;
+                
+                const eveElem = document.getElementById('kpiEveStatus');
+                if (data.latest_qkd.eve_present) {
+                    qberElem.className = "text-danger fw-bold";
+                    eveElem.innerHTML = '<strong>Security Alert:</strong> <span class="text-danger fw-bold"><i class="bi bi-shield-slash"></i> Eve Intercept Detected! (> 11%)</span>';
+                } else {
+                    qberElem.className = "text-success fw-bold";
+                    eveElem.innerHTML = '<strong>Security Status:</strong> <span class="text-success fw-bold"><i class="bi bi-shield-check"></i> Clean Channel (&le; 11%)</span>';
+                }
+            }
+        } catch (e) {
+            console.error("Stats fetch error:", e);
+        }
+    }
+
+    async function fetchReadings() {
+        try {
+            const res = await fetch('/api/readings');
+            const readings = await res.json();
+            const tbody = document.getElementById('readingsTableBody');
+            
+            if (!readings || readings.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted"><strong>No telemetry received yet. Click "Transmit Valid Telemetry" above.</strong></td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = readings.map(r => `
+                <tr>
+                    <td><strong>#${r.reading_id || '-'}</strong></td>
+                    <td><code class="text-warning fw-bold">${r.device_id}</code></td>
+                    <td>${r.temperature_c !== null ? '<strong class="text-white">' + r.temperature_c.toFixed(2) + ' &deg;C</strong>' : '-'}</td>
+                    <td>${r.humidity_percent !== null ? '<span class="text-info fw-bold">' + r.humidity_percent.toFixed(1) + ' %</span>' : '-'}</td>
+                    <td>${r.pressure_hpa !== null ? '<span class="text-secondary fw-bold">' + r.pressure_hpa.toFixed(1) + ' hPa</span>' : '-'}</td>
+                    <td>
+                        <span class="${r.status === 'AUTHENTICATED' ? 'badge-verified' : 'badge-danger-alert'}">
+                            <strong>${r.status}</strong>
+                        </span>
+                    </td>
+                    <td><code class="text-light">${r.decryption_latency_ms.toFixed(3)} ms</code></td>
+                    <td><code class="text-warning">${r.e2e_latency_ms.toFixed(2)} ms</code></td>
+                </tr>
+            `).join('');
+        } catch (e) {
+            console.error("Readings fetch error:", e);
+        }
+    }
+
+    async function fetchAlerts() {
+        try {
+            const res = await fetch('/api/alerts');
+            const alerts = await res.json();
+            const ul = document.getElementById('alertsList');
+            document.getElementById('alertCountBadge').innerText = `${alerts.length} ALERTS`;
+
+            if (!alerts || alerts.length === 0) {
+                ul.innerHTML = '<li class="list-group-item bg-transparent text-muted py-3 text-center"><strong>No integrity violations logged.</strong></li>';
+                return;
+            }
+
+            ul.innerHTML = alerts.map(a => `
+                <li class="list-group-item bg-transparent border-secondary text-light py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <strong class="text-danger"><i class="bi bi-exclamation-octagon-fill"></i> ${a.alert_type}</strong>
+                        <small class="text-muted fw-bold">${a.alert_timestamp.split('T')[1]?.substring(0,8) || a.alert_timestamp}</small>
+                    </div>
+                    <div class="small text-light mt-1">${a.details}</div>
+                    <div class="small text-warning mt-1"><strong>Target Device:</strong> <code>${a.device_id}</code></div>
+                </li>
+            `).join('');
+        } catch (e) {
+            console.error("Alerts fetch error:", e);
+        }
+    }
+
+    function showStatus(msg, isSuccess = true) {
+        const box = document.getElementById('actionStatus');
+        box.className = `alert ${isSuccess ? 'alert-warning' : 'alert-danger'} mt-3 mb-0 py-2`;
+        box.innerHTML = msg;
+        box.classList.remove('d-none');
+        setTimeout(() => box.classList.add('d-none'), 6000);
+    }
+
+    async function triggerQKD(withEve) {
+        try {
+            showStatus(`<i class="bi bi-hourglass-split"></i> <strong>Executing IBM Qiskit BB84 Simulation</strong> (${withEve ? 'Eve Intercept-Resend Active' : 'Noise-Free Quantum Channel'})...`, true);
+            const res = await fetch('/api/run_qkd', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ enable_eve: withEve })
+            });
+            const data = await res.json();
+            if (data.is_valid) {
+                showStatus(`<strong>BB84 SUCCESS:</strong> QBER = <strong>${(data.qber * 100).toFixed(2)}%</strong> (&le; 11% threshold). Derived 256-bit AES key via SHA-256 in <strong>${data.execution_time_ms} ms</strong>!`, true);
+            } else {
+                showStatus(`<strong>BB84 ABORTED (EVE DETECTED):</strong> QBER = <strong>${(data.qber * 100).toFixed(2)}%</strong> exceeded 11% threshold. Compromised key safely rejected!`, false);
+            }
+            refreshData();
+        } catch (e) {
+            showStatus(`Error triggering BB84: ${e}`, false);
+        }
+    }
+
+    async function triggerSensor(tamper) {
+        try {
+            const res = await fetch('/api/send_reading', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ tamper: tamper })
+            });
+            const data = await res.json();
+            if (data.success) {
+                if (tamper) {
+                    showStatus(`<strong>TAMPERED PACKET INJECTED:</strong> Ciphertext bit modified in transit. Cloud Receiver caught 128-bit authentication tag mismatch and logged a security alert!`, false);
+                } else {
+                    showStatus(`<strong>SENSOR TELEMETRY TRANSMITTED:</strong> Encrypted with AES-256-GCM in <strong>${data.encryption_time_ms} ms</strong> over MQTT. Cloud verified and stored!`, true);
+                }
+            } else {
+                showStatus(`Failed: ${data.error}`, false);
+            }
+            setTimeout(refreshData, 300);
+        } catch (e) {
+            showStatus(`Error sending reading: ${e}`, false);
+        }
+    }
+
+    function refreshData() {
+        fetchStats();
+        fetchReadings();
+        fetchAlerts();
+    }
+
+    // Auto-refresh every 3 seconds
+    setInterval(refreshData, 3000);
+    refreshData();
+</script>
+
+</body>
+</html>
