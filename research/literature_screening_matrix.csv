@@ -1,0 +1,39 @@
+Paper_ID,First_Author,Year,Title,Venue,Publisher,DOI,Theme,Screening_Status,Exclusion_Reason,Evidence_Level
+A1,Brassard,1994,Secret-key reconciliation by public discussion,EUROCRYPT 1993,Springer,10.1007/3-540-48285-7_35,A (Post-Processing),INCLUDED,N/A,ABSTRACT_ONLY
+A2,Bennett,1995,Generalized privacy amplification,IEEE Trans. Inf. Theory,IEEE,10.1109/18.476316,A (Post-Processing),INCLUDED,N/A,ABSTRACT_ONLY
+A3,Tomamichel,2012,Tight finite-key analysis for quantum cryptography,Nature Communications,Nature,10.1038/ncomms1631,A (Post-Processing),INCLUDED,N/A,FULL_TEXT_ACCESSED
+A4,Kiktenko,2017,Symmetric blind information reconciliation for quantum key distribution,Physical Review Applied,APS,10.1103/PhysRevApplied.8.044017,A (Post-Processing),INCLUDED,N/A,FULL_TEXT_ACCESSED
+A5,Tupkary,2026,Security proofs for practical QKD: Variations techniques gaps and limitations,Reviews of Modern Physics,APS,10.1103/28rs-frmw,A (Post-Processing),INCLUDED,N/A,ABSTRACT_ONLY
+A6,Mehic,2017,Implementation of quantum key distribution network simulation module in NS-3,Quantum Information Processing,Springer,10.1007/s11128-017-1702-z,A/B (Simulation),INCLUDED,N/A,FULL_TEXT_ACCESSED
+B1,Adu-Kyere,2022,Quantum Key Distribution: Modeling and Simulation through BB84 Protocol Using Python3,Sensors,MDPI,10.3390/s22166284,B (Simulation),INCLUDED,N/A,FULL_TEXT_ACCESSED
+B2,Coopmans,2021,NetSquid a NETwork Simulator for QUantum Information using Discrete events,Communications Physics,Nature,10.1038/s42005-021-00647-8,B (Simulation),INCLUDED,N/A,ABSTRACT_ONLY
+B3,DiAdamo,2021,QuNetSim: A Software Framework for Quantum Networks,IEEE Trans. Quantum Engineering,IEEE,10.1109/TQE.2021.3092395,B (Simulation),INCLUDED,N/A,ABSTRACT_ONLY
+B4,Fiorini,2024,Estimating Interception Density in the BB84 Protocol: A Study with a Noisy Quantum Simulator,Future Internet,MDPI,10.3390/fi16080275,B/C (Simulation/Noise),INCLUDED,N/A,FULL_TEXT_ACCESSED
+B5,Buyukdede,2026,A Virtualized BB84 QKD Simulator in Python Using Qiskit Aer for Education and Prototyping,Informatica,Slovenian Society Informatika,informatica.si/9101,B (Simulation),INCLUDED,N/A,ABSTRACT_ONLY
+B6,Das,2026,Simulating BB84 protocol with noise in quantum key distribution systems using IBM Qiskit,Physica Scripta,IOP,10.1088/1402-4896/ae79e4,B/C (Simulation/Noise),INCLUDED,N/A,ABSTRACT_ONLY
+B7,Hubballi,2026,Noise-Tolerant and Eavesdropper-Resilient BB84 QKD: A Qiskit-Based Simulation Framework,IEEE NQComp 2026,IEEE,10.1109/NQComp68334.2026.11497748,B/C (Simulation/Noise),INCLUDED,N/A,ABSTRACT_ONLY
+B8,Khan,2026,Simulation and Security Analysis of the BB84 QKD Protocol under Intercept-Resend and PNS Attacks,IEEE ICECTE 2026,IEEE,ieeexplore/11429278,B/C (Simulation/Noise),INCLUDED,N/A,ABSTRACT_ONLY
+C1,Fiorini,2025,Eavesdropper Detection in Six-State Protocol Against Partial Intercept-Resend Attack,Future Internet,MDPI,10.3390/fi17110500,C (Eavesdropping),INCLUDED,N/A,ABSTRACT_ONLY
+C2,Fiorini,2026,Threshold-based eavesdropper detection for partial intercept-resend attack in noisy BB84 QKD,Computer Networks,Elsevier,10.1016/j.comnet.2026.112058,C (Eavesdropping),INCLUDED,N/A,ABSTRACT_ONLY
+C3,Chaturvedi,2025,A hybrid multi-node QKD-ECC architecture for securing IoT networks,Scientific Reports,Nature,10.1038/s41598-025-17184-x,C/D (IoT Security),INCLUDED,N/A,ABSTRACT_ONLY
+C4,Manimozhi,2025,Post-quantum AES encryption using ECC points derived from BB84 sifted keys,EPJ Quantum Technology,Springer,10.1140/epjqt/s40507-025-00411-9,C/D (Hybrid Crypto),INCLUDED,N/A,ABSTRACT_ONLY
+C5,Biswas,2024,Enhancing IoT Security with Quantum Key Distribution: A Novel Approach,IEEE FNWF 2024,IEEE,10.1109/FNWF63303.2024.11028858,C/D (IoT Security),INCLUDED,N/A,ABSTRACT_ONLY
+D1,Rehman,2025,QESIF: A Lightweight Quantum-Enhanced IoT Security Framework for Smart Cities,Smart Cities,MDPI,10.3390/smartcities8040116,D (Key Mgmt),INCLUDED,N/A,ABSTRACT_ONLY
+D2,Alshowkan,2022,Authentication of smart grid communications using quantum key distribution,Scientific Reports,Nature,10.1038/s41598-022-16090-w,D (Key Mgmt),INCLUDED,N/A,ABSTRACT_ONLY
+D3,Farooq,2024,Enhanced Security Framework For MQTT Protocol Based IoT Network Using Quantum Key Distribution,IEEE WPMC 2024,IEEE,10.1109/WPMC63271.2024.10863467,D/E (MQTT QKD),INCLUDED,N/A,ABSTRACT_ONLY
+D4,Raveendra Babu,2024,Quantum secure authentication and key agreement protocols for IoT-enabled applications,Computer Science Review,Elsevier,10.1016/j.cosrev.2024.100676,D/G (Survey),INCLUDED,N/A,ABSTRACT_ONLY
+D5,Yang,2025,Feasibility discussion of quantum cryptography for Internet of Things security: a literature review,Optical and Quantum Electronics,Springer,10.1007/s11082-025-08168-2,D/G (Review),INCLUDED,N/A,ABSTRACT_ONLY
+D6,Chawla,2023,A Survey on Quantum Computing for Internet of Things Security,Procedia Computer Science,Elsevier,10.1016/j.procs.2023.01.195,D/G (Survey),INCLUDED,N/A,ABSTRACT_ONLY
+E1,Kaganurmath,2025,DLKS-MQTT: A Lightweight Key Sharing Protocol for Secure IoT Communications,ETASR,ETASR,10.48084/etasr.10216,E (MQTT Security),INCLUDED,N/A,ABSTRACT_ONLY
+E2,Dinculeana,2019,Vulnerabilities and Limitations of MQTT Protocol Used between IoT Devices,Applied Sciences,MDPI,10.3390/app9050848,E (MQTT Security),INCLUDED,N/A,ABSTRACT_ONLY
+E3,Granjal,2015,Security for the Internet of Things: A Survey of Existing Protocols and Open Research Issues,IEEE COMST,IEEE,10.1109/COMST.2015.2388550,E/G (Survey),INCLUDED,N/A,ABSTRACT_ONLY
+E4,Sharma,2025,A comprehensive survey on IoT security: Challenges security issues and countermeasures,Computer Science Review,Elsevier,10.1016/j.cosrev.2025.100839,E/G (Survey),INCLUDED,N/A,ABSTRACT_ONLY
+F1,Bos,2018,CRYSTALS-Kyber: A CCA-Secure Module-Lattice-Based KEM,IEEE EuroS&P 2018,IEEE,10.1109/EuroSP.2018.00032,F (PQC Baseline),INCLUDED,N/A,FULL_TEXT_ACCESSED
+F2,Shehzadi,2025,Kyber-KEM-Ascon: Benchmarking a Lightweight Post-quantum KEM on IoT Devices,IEEE ISCAS 2025,IEEE,10.1109/ISCAS56072.2025.11043792,F (PQC Baseline),INCLUDED,N/A,ABSTRACT_ONLY
+F3,Adere,2026,Systematic review on securing IoT systems with post quantum cryptography,Discover IoT,Springer,10.1007/s43926-025-00275-6,F/G (Review),INCLUDED,N/A,ABSTRACT_ONLY
+G1,Mallick,2026,Quantum-Secure Communication for Future Cyber-Physical and IoT Systems,Computers,MDPI,10.3390/computers15060389,G (Review),INCLUDED,N/A,ABSTRACT_ONLY
+EX1,Sharma & Kumar,2021,BB84 QKD protocol simulation for IoT security using Python,IJACSA,SAI,Not Found,B (Simulation),EXCLUDED,Not found in cited journal volume/issue,REJECTED
+EX2,VDE Verlag,2020,Research on Quantum Key Distribution Method Based on IoT Communication,VDE Proceedings,VDE,Not Found,D (IoT QKD),EXCLUDED,Could not be verified in any catalog,REJECTED
+EX3,Lazek,2026,Protocol extension to support post-quantum cryptography,VUT Brno Repository,VUT Brno,dspace.vut.cz,E/F (Thesis),EXCLUDED,Master thesis not peer-reviewed,ABSTRACT_ONLY
+EX4,Mina & Simion,2020,A Scalable Simulation of the BB84 Protocol Involving Eavesdropping,IACR ePrint,IACR,2020/1074,B (Simulation),EXCLUDED,Unreviewed preprint,ABSTRACT_ONLY
+EX5,Martinez Pavon,2024,Quantum Key Distribution in Constrained Networks,engrXiv,engrXiv,10.31224/5965,D (IoT QKD),EXCLUDED,Unreviewed preprint thesis,ABSTRACT_ONLY

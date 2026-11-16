@@ -1,0 +1,5 @@
+scheme,key_exchange_mechanism,handshake_time_ms,per_packet_overhead_bytes,key_exchange_overhead_bytes,quantum_safe,tamper_proof
+Plaintext MQTT,None,0.0,0,0,NO (Trivial Eavesdropping),NO
+Pre-Shared Key AES-256-GCM,Static Provisioning (PSK),0.0,28,0,YES (128-bit Grover margin),YES
+Post-Quantum ML-KEM-512 (Kyber) + AES-GCM,Lattice KEM Encapsulation (FIPS 203),2.15,28,768,YES (Computational Lattice),YES
+Proposed Hybrid QKD (Qiskit BB84) + AES-256-GCM,Quantum State Agreement + Universal Hash KDF,38.5,28,0,YES (Information-Theoretic Physics),YES

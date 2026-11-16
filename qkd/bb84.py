@@ -1,17 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Module A: BB84 Quantum Key Distribution Simulation using IBM Qiskit.
-Implements:
-1. State preparation (Alice)
-2. Channel transmission with optional Eve intercept-resend attack
-3. Basis measurement (Bob)
-4. Sifting phase (basis reconciliation)
-5. Parameter estimation & QBER calculation
-6. Privacy amplification / Key derivation using SHA-256 (yielding 256-bit AES key)
+Module A: BB84 Quantum Key Distribution Simulation using IBM Qiskit Aer.
+Orchestrates:
+1. Alice state preparation (qkd.alice)
+2. Channel transmission with optional Eve intercept-resend attack (qkd.eve) & noise (qkd.channel)
+3. Bob basis measurement (qkd.bob)
+4. Basis sifting / reconciliation filter (qkd.sifting)
+5. Parameter estimation & QBER threshold verification (qkd.qber)
+6. Information Reconciliation / Classical Error Correction (qkd.postprocessing.reconciliation)
+7. Universal-Hash Privacy Amplification / Key Derivation (qkd.postprocessing.privacy_amplification)
 """
 import time
-import random
-import hashlib
 import sys
 import os
 from dataclasses import dataclass
@@ -24,6 +23,14 @@ from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
 from qiskit_aer import AerSimulator
 
 import config
+from qkd.alice import Alice
+from qkd.bob import Bob
+from qkd.eve import Eve
+from qkd.channel import QuantumChannel
+from qkd.sifting import SiftingEngine
+from qkd.qber import QBEREstimator
+from qkd.postprocessing.reconciliation import InformationReconciler
+from qkd.postprocessing.privacy_amplification import PrivacyAmplifier
 
 
 @dataclass
@@ -36,9 +43,12 @@ class BB84Result:
     num_qubits: int                 # Initial number of transmitted qubits
     sifted_length: int              # Length of key after basis reconciliation (~50% of N)
     sample_length: int              # Number of bits sacrificed for QBER verification
-    remaining_length: int           # Number of bits fed into SHA-256 KDF
+    remaining_length: int           # Number of bits fed into reconciliation
     eve_present: bool               # Whether Eve was active during transmission
     execution_time_ms: float        # Total circuit & processing latency in milliseconds
+    reconciled_length: int = 0      # Length of reconciled error-free key
+    ec_leakage_bits: int = 0        # Parity bits disclosed during error correction
+    entropy_ratio: float = 1.0      # Min-entropy ratio [1 - h(QBER)]
 
 
 class BB84Simulator:
@@ -54,85 +64,60 @@ class BB84Simulator:
         enable_eve: bool = config.ENABLE_EVE,
         eve_prob: float = config.EVE_INTERCEPT_PROB,
         sample_fraction: float = config.SAMPLE_FRACTION,
-        threshold: float = config.QBER_THRESHOLD
+        threshold: float = config.QBER_THRESHOLD,
+        noise_param: float = 0.0
     ) -> BB84Result:
         """
-        Executes an end-to-end BB84 key exchange session.
+        Executes an end-to-end BB84 key exchange session with reconciliation and privacy amplification.
         """
         t0 = time.perf_counter()
 
-        # Step 1: Alice generates random bits and random bases
-        # 0 = Rectilinear (+, {|0>, |1>}), 1 = Diagonal (x, {|+>, |->})
-        alice_bits = [random.randint(0, 1) for _ in range(num_qubits)]
-        alice_bases = [random.randint(0, 1) for _ in range(num_qubits)]
+        # Step 1: Alice state preparation
+        alice = Alice(num_qubits=num_qubits)
+        alice_bits, alice_bases = alice.generate_random_bits_and_bases()
 
-        # Step 2: Bob generates random measurement bases
-        bob_bases = [random.randint(0, 1) for _ in range(num_qubits)]
+        # Step 2: Bob measurement preparation
+        bob = Bob(num_qubits=num_qubits)
+        bob_bases = bob.generate_random_bases()
 
-        # Step 3: Eve generates random bases and decides interception per qubit
-        eve_bases = [random.randint(0, 1) for _ in range(num_qubits)]
-        eve_intercepts = [
-            enable_eve and (random.random() < eve_prob) for _ in range(num_qubits)
-        ]
+        # Step 3: Eve intercept-resend configuration
+        eve = Eve(num_qubits=num_qubits, intercept_prob=eve_prob)
+        if enable_eve:
+            eve.configure_attack()
 
         # Step 4: Construct Quantum Circuit in Qiskit
         qr = QuantumRegister(num_qubits, name="q")
         cr_bob = ClassicalRegister(num_qubits, name="c_bob")
-        
-        registers = [qr, cr_bob]
+
         if enable_eve:
             cr_eve = ClassicalRegister(num_qubits, name="c_eve")
-            registers.append(cr_eve)
             qc = QuantumCircuit(qr, cr_eve, cr_bob)
         else:
             qc = QuantumCircuit(qr, cr_bob)
 
-        for i in range(num_qubits):
-            # --- Alice State Preparation ---
-            # |0> by default
-            if alice_bits[i] == 1:
-                qc.x(qr[i])  # Flip to |1>
-            if alice_bases[i] == config.BASIS_DIAGONAL:
-                qc.h(qr[i])  # Rotate to |+> or |->
+        # Alice encodes state
+        alice.prepare_quantum_circuits(qr, qc)
 
-            # --- Quantum Channel Transmission & Eve Simulation ---
-            if enable_eve and eve_intercepts[i]:
-                # Eve measures in her chosen basis
-                if eve_bases[i] == config.BASIS_DIAGONAL:
-                    qc.h(qr[i])
-                qc.measure(qr[i], cr_eve[i])
-                # Eve re-prepares in her basis
-                if eve_bases[i] == config.BASIS_DIAGONAL:
-                    qc.h(qr[i])
+        # Eve intercept-resend attack (if active)
+        if enable_eve:
+            eve.apply_intercept_resend(qr, cr_eve, qc)
 
-            # --- Bob Receives and Measures ---
-            if bob_bases[i] == config.BASIS_DIAGONAL:
-                qc.h(qr[i])
-            qc.measure(qr[i], cr_bob[i])
+        # Bob basis rotation & measurement
+        bob.apply_measurement_circuits(qr, cr_bob, qc)
 
-        # Step 5: Execute Simulation
-        job = self.backend.run(qc, shots=config.SIMULATOR_SHOTS)
+        # Step 5: Execute Simulation on Aer Backend (with optional noise)
+        noise_model = QuantumChannel.create_depolarizing_noise_model(noise_param)
+        job = self.backend.run(qc, shots=config.SIMULATOR_SHOTS, noise_model=noise_model)
         result = job.result()
         raw_counts = list(result.get_counts().keys())[0]
 
-        # In Qiskit, measurements are ordered with c_bob as the rightmost/leftmost register
-        # Format with multiple classical registers is space-separated strings
-        if enable_eve:
-            # Format: 'c_bob c_eve'
-            bob_str, _ = raw_counts.split(' ')
-        else:
-            bob_str = raw_counts
+        # Extract Bob's measured bits
+        bob_bits = bob.extract_bits_from_counts(raw_counts)
 
-        # Qiskit orders classical bits in reverse (index 0 is at the end)
-        bob_bits = [int(b) for b in reversed(bob_str)]
-
-        # Step 6: Sifting Phase (Basis Reconciliation)
-        # Alice and Bob announce bases publicly and keep only matching indices
-        sifted_indices = [
-            i for i in range(num_qubits) if alice_bases[i] == bob_bases[i]
-        ]
-        sifted_alice = [alice_bits[i] for i in sifted_indices]
-        sifted_bob = [bob_bits[i] for i in sifted_indices]
+        # Step 6: Classical Basis Sifting
+        sifted_indices, sifted_alice, sifted_bob = SiftingEngine.sift(
+            alice_bits, alice_bases, bob_bits, bob_bases
+        )
         sifted_len = len(sifted_alice)
 
         if sifted_len == 0:
@@ -151,36 +136,36 @@ class BB84Simulator:
             )
 
         # Step 7: Parameter Estimation & QBER Verification
-        sample_size = max(1, int(sifted_len * sample_fraction))
-        sample_indices = set(random.sample(range(sifted_len), sample_size))
-
-        sample_errors = sum(
-            1 for idx in sample_indices if sifted_alice[idx] != sifted_bob[idx]
+        qber, is_valid, rem_alice, rem_bob, sample_size, errors = QBEREstimator.estimate(
+            sifted_alice, sifted_bob, sample_fraction=sample_fraction, threshold=threshold
         )
-        qber = sample_errors / sample_size
-
-        # Discard sampled verification bits from the key material
-        remaining_alice = [
-            sifted_alice[i] for i in range(sifted_len) if i not in sample_indices
-        ]
-        remaining_bob = [
-            sifted_bob[i] for i in range(sifted_len) if i not in sample_indices
-        ]
-        remaining_len = len(remaining_alice)
-
-        # Step 8: Security Decision & Key Derivation (Privacy Amplification)
-        # If QBER exceeds threshold, abort key agreement
-        is_valid = (qber <= threshold) and (remaining_len > 0)
+        remaining_len = len(rem_alice)
 
         alice_key = None
         bob_key = None
-        if is_valid:
-            # Key Derivation via SHA-256 into 256-bit AES key
-            alice_bitstring = "".join(str(b) for b in remaining_alice)
-            bob_bitstring = "".join(str(b) for b in remaining_bob)
+        reconciled_len = 0
+        ec_leakage = 0
+        entropy_ratio = 1.0
 
-            alice_key = hashlib.sha256(alice_bitstring.encode("utf-8")).digest()
-            bob_key = hashlib.sha256(bob_bitstring.encode("utf-8")).digest()
+        # Step 8: Information Reconciliation & Privacy Amplification
+        if is_valid and remaining_len > 0:
+            # Correct any residual bit differences between Alice and Bob
+            rec_alice, rec_bob, ec_leakage, is_identical = InformationReconciler.reconcile(
+                rem_alice, rem_bob, estimated_qber=qber
+            )
+            reconciled_len = len(rec_alice)
+
+            if is_identical:
+                # Privacy Amplification via Universal Hashing (2-universal hash bound)
+                alice_key, _, entropy_ratio = PrivacyAmplifier.amplify(
+                    rec_alice, qber=qber, ec_leakage_bits=ec_leakage, target_key_bytes=config.AES_KEY_SIZE_BYTES
+                )
+                bob_key, _, _ = PrivacyAmplifier.amplify(
+                    rec_bob, qber=qber, ec_leakage_bits=ec_leakage, target_key_bytes=config.AES_KEY_SIZE_BYTES
+                )
+            else:
+                # Reconciliation failed to correct all errors; abort
+                is_valid = False
 
         t1 = time.perf_counter()
         return BB84Result(
@@ -193,20 +178,25 @@ class BB84Simulator:
             sample_length=sample_size,
             remaining_length=remaining_len,
             eve_present=enable_eve,
-            execution_time_ms=(t1 - t0) * 1000.0
+            execution_time_ms=(t1 - t0) * 1000.0,
+            reconciled_length=reconciled_len,
+            ec_leakage_bits=ec_leakage,
+            entropy_ratio=entropy_ratio
         )
 
 
 if __name__ == "__main__":
     sim = BB84Simulator()
-    print("=== Testing BB84 QKD without Eve ===")
+    print("=== Testing Upgraded Modular BB84 QKD without Eve ===")
     res_no_eve = sim.run(num_qubits=512, enable_eve=False)
-    print(f"Valid: {res_no_eve.is_valid}, QBER: {res_no_eve.qber:.4f}, Sifted: {res_no_eve.sifted_length}, Remaining: {res_no_eve.remaining_length}, Time: {res_no_eve.execution_time_ms:.2f}ms")
+    print(f"Valid: {res_no_eve.is_valid}, QBER: {res_no_eve.qber:.4f}, Sifted: {res_no_eve.sifted_length}, "
+          f"Reconciled: {res_no_eve.reconciled_length}, EC Leakage: {res_no_eve.ec_leakage_bits} bits, "
+          f"Time: {res_no_eve.execution_time_ms:.2f}ms")
     if res_no_eve.alice_key:
         print(f"Alice Key (hex): {res_no_eve.alice_key.hex()}")
         print(f"Keys Match: {res_no_eve.alice_key == res_no_eve.bob_key}")
 
-    print("\n=== Testing BB84 QKD with Eve ===")
+    print("\n=== Testing Upgraded Modular BB84 QKD with Eve ===")
     res_eve = sim.run(num_qubits=512, enable_eve=True)
     print(f"Valid: {res_eve.is_valid}, QBER: {res_eve.qber:.4f}, Threshold: {config.QBER_THRESHOLD}")
     print(f"Eve Detected (Key Aborted): {not res_eve.is_valid}")

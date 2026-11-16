@@ -28,3 +28,6 @@ env/
 # Database files (optional: comment out if fresh DB is preferred)
 database/*.db
 database/*.db-journal
+database/*.db-shm
+database/*.db-wal
+

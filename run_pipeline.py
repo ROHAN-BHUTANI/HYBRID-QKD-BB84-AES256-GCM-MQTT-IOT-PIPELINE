@@ -2,16 +2,18 @@
 """
 Main Prototype Pipeline Runner.
 Executes an end-to-end demonstration of the Hybrid BB84 QKD + AES-256-GCM IoT Security Pipeline:
-1. Runs Qiskit BB84 QKD protocol to negotiate shared 256-bit AES key
+1. Runs Qiskit BB84 QKD protocol with Information Reconciliation & Universal Hashing
 2. Initializes Cloud Receiver and subscribes to MQTT broker
-3. Publishes encrypted environmental sensor telemetry from IoT Client
+3. Publishes authenticated environmental sensor telemetry from IoT Client
 4. Simulates MitM classical tampering attack (demonstrating AES-GCM tag verification failure)
-5. Simulates Eve quantum intercept-resend attack (demonstrating QBER-based abort)
-6. Displays database telemetry summary
+5. Simulates Replay attack (demonstrating monotonic sequence number rejection)
+6. Simulates Eve quantum intercept-resend attack (demonstrating QBER-based abort)
+7. Displays database telemetry and security summary
 """
 import sys
 import os
 import time
+import json
 
 # Ensure UTF-8 output encoding on Windows console
 if hasattr(sys.stdout, "reconfigure"):
@@ -47,7 +49,8 @@ def run_full_pipeline_demo():
     print(f"  -> Sifted Key Length: {qkd_result.sifted_length} bits (basis matches)")
     print(f"  -> Sacrificed Sample: {qkd_result.sample_length} bits for parameter estimation")
     print(f"  -> Measured QBER: {qkd_result.qber * 100:.2f}% (Abort Threshold: {config.QBER_THRESHOLD * 100}%)")
-    print(f"  -> Remaining Key Material: {qkd_result.remaining_length} bits")
+    print(f"  -> Information Reconciliation: Corrected {qkd_result.reconciled_length} bits (Leakage: {qkd_result.ec_leakage_bits} bits)")
+    print(f"  -> Universal Hash Privacy Amplification: Derived 256-bit AES Key")
     print(f"  -> QKD Protocol Time: {qkd_result.execution_time_ms:.2f} ms")
 
     if not qkd_result.is_valid or not qkd_result.alice_key:
@@ -79,11 +82,14 @@ def run_full_pipeline_demo():
 
     def on_cloud_message(event):
         received_packets.append(event)
-        if event["status"] == "AUTHENTICATED":
+        status = event["status"]
+        if status == "AUTHENTICATED":
             d = event["data"]
             print(f"  [Cloud Receiver] DECRYPTED & AUTHENTICATED reading #{d.get('reading_id')}: "
                   f"Temp={d.get('temperature_c')}°C, Hum={d.get('humidity_percent')}%, Press={d.get('pressure_hpa')} hPa "
                   f"(Dec: {event['dec_latency_ms']:.3f}ms, E2E: {event['e2e_latency_ms']:.2f}ms)")
+        elif status == "REPLAY_REJECTED":
+            print(f"  [Cloud Receiver] REPLAY ATTACK BLOCKED! Duplicate sequence #{event.get('reading_id')} rejected!")
         else:
             print(f"  [Cloud Receiver] TAMPER DETECTED! Rejected corrupted packet from {event.get('device_id')} "
                   f"(E2E: {event['e2e_latency_ms']:.2f}ms)")
@@ -104,8 +110,10 @@ def run_full_pipeline_demo():
     sensor.connect()
 
     print("  -> Publishing 5 authenticated sensor telemetry packets...")
+    saved_envelopes = []
     for i in range(1, 6):
         env, enc_ms = sensor.publish_reading()
+        saved_envelopes.append(env)
         print(f"  [IoT Sensor] Encrypted reading #{i} in {enc_ms:.3f}ms | Nonce: {env['nonce'][:12]}... | Tag: {env['tag'][:12]}...")
         time.sleep(0.1)
 
@@ -114,9 +122,19 @@ def run_full_pipeline_demo():
     # --------------------------------------------------------------------------
     # PHASE 4: Security Test - Classical MitM Tampering Simulation
     # --------------------------------------------------------------------------
-    print("\n[PHASE 4] Security Test: Classical Man-in-the-Middle (MitM) Tampering Attack...")
+    print("\n[PHASE 4A] Security Test: Classical Man-in-the-Middle (MitM) Tampering Attack...")
     print("  -> Transmitting packet with modified ciphertext in transit...")
     tampered_env, _ = sensor.publish_reading(tamper=True)
+    time.sleep(0.3)
+
+    # --------------------------------------------------------------------------
+    # PHASE 4B: Security Test - Replay Attack Simulation
+    # --------------------------------------------------------------------------
+    print("\n[PHASE 4B] Security Test: Classical Replay Attack Simulation...")
+    print("  -> Replaying previously captured valid packet #1...")
+    if saved_envelopes:
+        replay_payload_str = json.dumps(saved_envelopes[0])
+        sensor.mqtt_client.publish(config.MQTT_TOPIC_DATA, replay_payload_str)
     time.sleep(0.3)
 
     # --------------------------------------------------------------------------
@@ -140,7 +158,7 @@ def run_full_pipeline_demo():
     print("  DATABASE & TELEMETRY SUMMARY")
     print("=" * 78)
     print(f"  - Total Authenticated Messages Stored: {summary['authenticated_packets']}")
-    print(f"  - Total Tampering Attacks Intercepted: {summary['tampered_packets']}")
+    print(f"  - Total Tampering / Replay Attacks:     {summary['tampered_packets']}")
     print(f"  - Average AES Decryption Latency:       {summary['avg_decryption_ms']} ms")
     print(f"  - Average End-to-End Latency:           {summary['avg_e2e_latency_ms']} ms")
     print(f"  - Total QKD Sessions Logged:            {summary['total_qkd_sessions']}")

@@ -4,7 +4,8 @@ Database Management Module.
 Manages persistent SQLite storage for:
 - Authenticated and tampered IoT sensor telemetry
 - QKD key agreement sessions and QBER diagnostics
-- Security and tamper detection alerts
+- Security, tamper detection, and replay alerts
+- Device state and monotonic sequence tracking
 """
 import os
 import sys
@@ -19,7 +20,7 @@ import config
 
 class DatabaseManager:
     """
-    SQLite3 wrapper for IoT telemetry, QKD audit sessions, and security alerts.
+    SQLite3 wrapper for IoT telemetry, QKD audit sessions, device sequence tracking, and security alerts.
     """
     def __init__(self, db_path: str = config.DATABASE_PATH):
         self.db_path = db_path
@@ -29,14 +30,28 @@ class DatabaseManager:
     def get_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     def init_db(self):
-        """Initializes database schema if tables do not exist."""
+        """Initializes database schema with constraints, indexes, and migrations."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             
-            # Table 1: Sensor Readings
+            # Table 1: Sensor Devices (Tracks monotonic sequence watermark for anti-replay)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sensor_devices (
+                device_id TEXT PRIMARY KEY,
+                device_name TEXT NOT NULL,
+                sensor_model TEXT DEFAULT 'BME280',
+                location TEXT DEFAULT 'Field Node 01',
+                registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_sequence_id INTEGER DEFAULT 0
+            )
+            """)
+
+            # Table 2: Sensor Readings
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS sensor_readings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,13 +62,15 @@ class DatabaseManager:
                 humidity_percent REAL,
                 pressure_hpa REAL,
                 status TEXT NOT NULL,
-                decryption_latency_ms REAL,
-                e2e_latency_ms REAL,
+                decryption_latency_ms REAL NOT NULL DEFAULT 0.0,
+                e2e_latency_ms REAL NOT NULL DEFAULT 0.0,
                 received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_readings_device_status ON sensor_readings(device_id, status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_readings_received ON sensor_readings(received_at)")
 
-            # Table 2: QKD Audit Sessions
+            # Table 3: QKD Audit Sessions
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS qkd_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,15 +78,17 @@ class DatabaseManager:
                 num_qubits INTEGER NOT NULL,
                 sifted_length INTEGER NOT NULL,
                 qber REAL NOT NULL,
-                threshold REAL NOT NULL,
-                is_valid INTEGER NOT NULL,
-                eve_present INTEGER NOT NULL,
+                threshold REAL NOT NULL DEFAULT 0.11,
+                is_valid INTEGER NOT NULL CHECK (is_valid IN (0, 1)),
+                eve_present INTEGER NOT NULL CHECK (eve_present IN (0, 1)),
                 execution_time_ms REAL NOT NULL,
                 key_preview TEXT
             )
             """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_qkd_timestamp ON qkd_sessions(session_timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_qkd_valid ON qkd_sessions(is_valid)")
 
-            # Table 3: Security & Tamper Alerts
+            # Table 4: Security & Tamper Alerts
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS security_alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,6 +98,41 @@ class DatabaseManager:
                 device_id TEXT
             )
             """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON security_alerts(alert_timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_type ON security_alerts(alert_type)")
+
+            # --- Migration Check for columns ---
+            cursor.execute("PRAGMA table_info(security_alerts)")
+            alert_cols = [col["name"] for col in cursor.fetchall()]
+            if "severity" not in alert_cols:
+                cursor.execute("ALTER TABLE security_alerts ADD COLUMN severity TEXT DEFAULT 'CRITICAL'")
+
+            conn.commit()
+
+    def get_device_sequence(self, device_id: str) -> int:
+        """Retrieves the highest observed sequence ID for a device."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT last_sequence_id FROM sensor_devices WHERE device_id = ?", (device_id,))
+            row = cursor.fetchone()
+            if row:
+                return row["last_sequence_id"]
+            cursor.execute(
+                "INSERT INTO sensor_devices (device_id, device_name, last_sequence_id) VALUES (?, ?, 0)",
+                (device_id, f"Node-{device_id}")
+            )
+            conn.commit()
+            return 0
+
+    def update_device_sequence(self, device_id: str, sequence_id: int):
+        """Updates the highest sequence ID watermark for a device."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO sensor_devices (device_id, device_name, last_sequence_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT(device_id) DO UPDATE SET last_sequence_id = MAX(last_sequence_id, excluded.last_sequence_id)
+            """, (device_id, f"Node-{device_id}", sequence_id))
             conn.commit()
 
     def log_sensor_reading(
@@ -132,13 +186,13 @@ class DatabaseManager:
             ))
             conn.commit()
 
-    def log_security_alert(self, alert_type: str, details: str, device_id: str):
+    def log_security_alert(self, alert_type: str, details: str, device_id: str, severity: str = "CRITICAL"):
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-            INSERT INTO security_alerts (alert_type, details, device_id)
-            VALUES (?, ?, ?)
-            """, (alert_type, details, device_id))
+            INSERT INTO security_alerts (alert_type, details, device_id, severity)
+            VALUES (?, ?, ?, ?)
+            """, (alert_type, details, device_id, severity))
             conn.commit()
 
     def get_recent_readings(self, limit: int = 25) -> List[Dict[str, Any]]:
@@ -192,4 +246,3 @@ class DatabaseManager:
                 "total_qkd_sessions": total_qkd,
                 "successful_qkd_sessions": valid_qkd
             }
-

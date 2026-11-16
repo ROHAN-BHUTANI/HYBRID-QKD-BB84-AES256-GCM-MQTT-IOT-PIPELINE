@@ -2,8 +2,8 @@
 """
 Module C: Cloud Receiver.
 Subscribes to incoming IoT sensor envelopes over MQTT, decrypts with AES-256-GCM,
-verifies cryptographic authentication tags, records end-to-end latency, and
-persists data in SQLite.
+verifies cryptographic authentication tags, enforces stateful anti-replay protection,
+records end-to-end latency, and persists data in SQLite.
 """
 import sys
 import os
@@ -24,7 +24,8 @@ from broker.broker_bridge import get_mqtt_client, BaseMQTTClient
 
 class CloudReceiver:
     """
-    Cloud gateway server listening for MQTT sensor telemetry and decrypting with AES-256-GCM.
+    Cloud gateway server listening for MQTT sensor telemetry, enforcing AES-256-GCM verification,
+    anti-replay sequence tracking, and SQLite persistence.
     """
     def __init__(
         self,
@@ -73,18 +74,54 @@ class CloudReceiver:
             return
 
         try:
-            # Decrypt with AES-256-GCM and verify authentication tag
+            # Decrypt with AES-256-GCM and verify 128-bit authentication tag
             decrypted_data, dec_latency_ms = CryptoUtils.decrypt_payload(
                 self.aes_key, envelope
             )
 
-            # Successfully authenticated & decrypted
             reading_id = decrypted_data.get("reading_id")
             sensor_ts = decrypted_data.get("timestamp", "")
             temp = decrypted_data.get("temperature_c")
             humidity = decrypted_data.get("humidity_percent")
             pressure = decrypted_data.get("pressure_hpa")
 
+            # --- Anti-Replay Verification ---
+            last_seq = self.db.get_device_sequence(device_id)
+            if reading_id is not None and reading_id <= last_seq:
+                # Replay attack detected! Sequence number has already been seen or is stale
+                print(f"[SECURITY ALERT] Replay attack detected from {device_id}! "
+                      f"Reading ID #{reading_id} <= last seen watermark #{last_seq}.")
+                self.db.log_security_alert(
+                    alert_type="REPLAY_ATTACK",
+                    details=f"Duplicate or stale sequence number #{reading_id} received (watermark: #{last_seq}).",
+                    device_id=device_id,
+                    severity="HIGH"
+                )
+                self.db.log_sensor_reading(
+                    device_id=device_id,
+                    reading_id=reading_id,
+                    sensor_timestamp=sensor_ts,
+                    temp=temp,
+                    humidity=humidity,
+                    pressure=pressure,
+                    status="REPLAY_REJECTED",
+                    dec_latency_ms=dec_latency_ms,
+                    e2e_latency_ms=e2e_latency_ms
+                )
+                if self.on_message_callback:
+                    self.on_message_callback({
+                        "status": "REPLAY_REJECTED",
+                        "device_id": device_id,
+                        "reading_id": reading_id,
+                        "e2e_latency_ms": e2e_latency_ms
+                    })
+                return
+
+            # Update sequence watermark
+            if reading_id is not None:
+                self.db.update_device_sequence(device_id, reading_id)
+
+            # Successfully authenticated & fresh reading
             self.db.log_sensor_reading(
                 device_id=device_id,
                 reading_id=reading_id,
@@ -111,8 +148,9 @@ class CloudReceiver:
             print(f"[SECURITY ALERT] Tampering detected in message from {device_id}!")
             self.db.log_security_alert(
                 alert_type="INTEGRITY_VIOLATION",
-                details="AES-256-GCM authentication tag mismatch. Ciphertext or tag modified in transit.",
-                device_id=device_id
+                details="AES-256-GCM authentication tag mismatch. Ciphertext or nonce modified in transit.",
+                device_id=device_id,
+                severity="CRITICAL"
             )
             self.db.log_sensor_reading(
                 device_id=device_id,
@@ -144,4 +182,3 @@ if __name__ == "__main__":
     print("Cloud Receiver initialized and subscribed to", config.MQTT_TOPIC_DATA)
     time.sleep(1)
     receiver.stop()
-

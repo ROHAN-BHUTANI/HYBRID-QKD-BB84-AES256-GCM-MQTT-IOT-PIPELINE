@@ -3,8 +3,9 @@
 Module B: IoT Sensor Client.
 Simulates an edge IoT device:
 1. Generates environmental telemetry (temperature, humidity, pressure)
-2. Encrypts payload using AES-256-GCM with quantum-derived key and unique nonce
-3. Publishes encrypted envelope over MQTT
+2. Tracks monotonic sequence numbers across session restarts
+3. Encrypts payload using AES-256-GCM with quantum-derived key and unique nonce
+4. Publishes encrypted envelope over MQTT
 """
 import sys
 import os
@@ -26,10 +27,26 @@ class IoTSensorClient:
     """
     Simulated IoT edge device that encrypts readings with AES-256-GCM and publishes via MQTT.
     """
-    def __init__(self, device_id: str = config.DEVICE_ID, aes_key: Optional[bytes] = None):
+    def __init__(
+        self,
+        device_id: str = config.DEVICE_ID,
+        aes_key: Optional[bytes] = None,
+        initial_seq: Optional[int] = None
+    ):
         self.device_id = device_id
         self.aes_key = aes_key
-        self.seq_num = 0
+        
+        # Initialize sequence from DB watermark if not explicitly provided
+        if initial_seq is None:
+            try:
+                from cloud_receiver.database import DatabaseManager
+                db = DatabaseManager()
+                self.seq_num = db.get_device_sequence(device_id)
+            except Exception:
+                self.seq_num = 0
+        else:
+            self.seq_num = initial_seq
+
         self.mqtt_client: BaseMQTTClient = get_mqtt_client(f"{device_id}_pub")
         self.connected = False
 
@@ -99,24 +116,9 @@ class IoTSensorClient:
             # Flip character in base64 string
             raw_ct[0] = 'Z' if raw_ct[0] != 'Z' else 'Y'
             envelope["ciphertext"] = "".join(raw_ct)
-            envelope["tampered_in_transit"] = True
 
-        payload_json = json.dumps(envelope)
+        # Publish over MQTT
+        payload_str = json.dumps(envelope)
+        self.mqtt_client.publish(config.MQTT_TOPIC_DATA, payload_str)
 
-        if not self.connected:
-            self.connect()
-
-        self.mqtt_client.publish(config.MQTT_TOPIC_DATA, payload_json)
         return envelope, enc_time
-
-
-if __name__ == "__main__":
-    import os
-    test_key = os.urandom(32)
-    client = IoTSensorClient(aes_key=test_key)
-    client.connect()
-    env, enc_ms = client.publish_reading()
-    print(f"Published envelope in {enc_ms:.4f} ms")
-    print("Envelope keys:", list(env.keys()))
-    client.disconnect()
-
