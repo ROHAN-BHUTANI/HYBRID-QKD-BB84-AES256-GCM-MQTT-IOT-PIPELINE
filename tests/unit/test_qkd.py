@@ -93,19 +93,38 @@ def test_information_reconciler():
 
 
 def test_privacy_amplifier():
-    """Verify universal-hash privacy amplification produces 256-bit key."""
-    reconciled = [1, 0, 1, 1] * 32  # 128 bits
-    key, sec_bits, ratio = PrivacyAmplifier.amplify(reconciled, qber=0.02, target_key_bytes=32)
+    """Verify 2-universal Toeplitz privacy amplification and finite-key bounds."""
+    from qkd.postprocessing.privacy_amplification import ToeplitzHash
+
+    # 1. Test Toeplitz GF(2) multiplication
+    x = [1, 0, 1, 1, 0]
+    out = ToeplitzHash.multiply_gf2(x, out_bits=3)
+    assert len(out) == 3
+    assert all(b in (0, 1) for b in out)
+
+    # 2. Test sufficient key material produces 256-bit key
+    reconciled_large = [1, 0, 1, 1] * 150  # 600 bits
+    key, sec_bits, ratio = PrivacyAmplifier.amplify(
+        reconciled_large, qber=0.01, ec_leakage_bits=20, target_key_bytes=32
+    )
     assert key is not None
     assert len(key) == 32
-    assert sec_bits > 0
+    assert sec_bits >= 256
     assert 0.0 < ratio <= 1.0
+
+    # 3. Test insufficient key material correctly returns None (no manufactured entropy)
+    reconciled_short = [1, 0] * 50  # 100 bits (cannot yield 256 bits)
+    key_short, sec_short, _ = PrivacyAmplifier.amplify(
+        reconciled_short, qber=0.05, ec_leakage_bits=30, target_key_bytes=32
+    )
+    assert key_short is None
+    assert sec_short < 256
 
 
 def test_bb84_simulator_clean():
-    """Verify end-to-end BB84 without Eve produces matching valid keys."""
+    """Verify end-to-end BB84 without Eve produces matching valid keys with N=1536."""
     sim = BB84Simulator()
-    res = sim.run(num_qubits=256, enable_eve=False)
+    res = sim.run(num_qubits=1536, enable_eve=False)
     assert res.is_valid is True
     assert res.qber <= 0.11
     assert res.alice_key is not None

@@ -41,8 +41,8 @@ def analyze_exp1(raw_dir: str) -> str:
     for r in rows:
         grouped[int(r["num_qubits"])].append(r)
 
-    md = "### Table 1: EXP-1 QKD Circuit Scaling & Post-Processing Yield\n\n"
-    md += "| Qubit Block Size ($N$) | Sifted Bits ($\mu$) | Reconciled Bits ($\mu$) | QBER ($\mu \pm \sigma$) | Execution Time (ms) ($\mu \pm \sigma$) | Convergence Rate (%) |\n"
+    md = "### Table 1: EXP-1 QKD Circuit Scaling & 2-Universal Toeplitz Key Yield\n\n"
+    md += "| Qubit Block Size ($N$) | Sifted Bits ($\mu$) | Reconciled Bits ($\mu$) | QBER ($\mu \pm \sigma$) | Execution Time (ms) ($\mu \pm \sigma$) | 256-bit AES Extraction Rate (%) |\n"
     md += "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
 
     for n in sorted(grouped.keys()):
@@ -51,15 +51,15 @@ def analyze_exp1(raw_dir: str) -> str:
         reconciled = [float(x["reconciled_bits"]) for x in items]
         qber = [float(x["qber"]) for x in items]
         exec_t = [float(x["exec_time_ms"]) for x in items]
-        valid = [int(x["is_valid"]) for x in items]
+        has_256 = [int(x.get("key_derived_256bit", x.get("is_valid", 1))) for x in items]
 
         s_m, _, _ = mean_std(sifted)
         r_m, _, _ = mean_std(reconciled)
         q_m, q_s, _ = mean_std(qber)
         t_m, t_s, _ = mean_std(exec_t)
-        v_rate = (sum(valid) / len(valid)) * 100.0
+        key_rate = (sum(has_256) / len(has_256)) * 100.0
 
-        md += f"| {n} | {s_m:.1f} | {r_m:.1f} | {q_m:.4f} $\\pm$ {q_s:.4f} | {t_m:.2f} $\\pm$ {t_s:.2f} | {v_rate:.1f}% |\n"
+        md += f"| {n} | {s_m:.1f} | {r_m:.1f} | {q_m:.4f} $\\pm$ {q_s:.4f} | {t_m:.2f} $\\pm$ {t_s:.2f} | {key_rate:.1f}% |\n"
 
     return md
 

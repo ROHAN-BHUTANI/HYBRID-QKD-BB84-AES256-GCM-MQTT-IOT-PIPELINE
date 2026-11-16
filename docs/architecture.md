@@ -191,7 +191,7 @@ sequenceDiagram
     Crypto-->>Sensor: Base64 JSON Envelope
     Sensor->>Broker: MQTT Publish (topic: iot/secure/data)
     Broker->>Cloud: Dispatch MQTT message
-    Cloud->>Cloud: Validate reading_id > last_seen_sequence (Anti-Replay)
+    Cloud->>Cloud: Validate reading_id against RFC 64-packet sliding window bitmap (Anti-Replay)
     alt Payload is Valid and Untampered
         Cloud->>Cloud: decrypt_and_verify(AES_Key, Envelope)
         Note over Cloud: GMAC Tag Matches (Authentication Valid)

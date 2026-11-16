@@ -102,6 +102,11 @@ class BB84Simulator:
         if enable_eve:
             eve.apply_intercept_resend(qr, cr_eve, qc)
 
+        # Quantum Channel Transit Phase: insert identity gates on all qubits
+        # Guarantees that channel noise (depolarizing/Pauli) acts uniformly on every photon
+        for i in range(num_qubits):
+            qc.id(qr[i])
+
         # Bob basis rotation & measurement
         bob.apply_measurement_circuits(qr, cr_bob, qc)
 

@@ -17,7 +17,7 @@ class QuantumChannel:
     @staticmethod
     def create_depolarizing_noise_model(error_prob: float = 0.0) -> Optional[NoiseModel]:
         """
-        Creates a single-qubit depolarizing error channel applied to single-qubit gates (x, h).
+        Creates a single-qubit depolarizing error channel applied to channel transit ('id') gates.
         If error_prob <= 0.0, returns None (ideal noiseless channel).
         """
         if error_prob <= 0.0:
@@ -27,7 +27,8 @@ class QuantumChannel:
         p = min(0.75, max(0.0, error_prob))
         noise_model = NoiseModel()
         error_gate = depolarizing_error(p, 1)
-        noise_model.add_all_qubit_quantum_error(error_gate, ["x", "h", "id"])
+        # Apply error strictly to 'id' gates representing channel propagation
+        noise_model.add_all_qubit_quantum_error(error_gate, ["id"])
         return noise_model
 
     @staticmethod
@@ -36,7 +37,7 @@ class QuantumChannel:
         phase_flip_prob: float = 0.0
     ) -> Optional[NoiseModel]:
         """
-        Creates a single-qubit Pauli bit-flip (X) and phase-flip (Z) error channel.
+        Creates a single-qubit Pauli bit-flip (X) and phase-flip (Z) error channel applied to 'id' gates.
         """
         if bit_flip_prob <= 0.0 and phase_flip_prob <= 0.0:
             return None
@@ -47,5 +48,5 @@ class QuantumChannel:
 
         error_gate = pauli_error([('X', px), ('Z', pz), ('I', pi)])
         noise_model = NoiseModel()
-        noise_model.add_all_qubit_quantum_error(error_gate, ["x", "h", "id"])
+        noise_model.add_all_qubit_quantum_error(error_gate, ["id"])
         return noise_model

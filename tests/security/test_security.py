@@ -93,3 +93,29 @@ def test_cloud_receiver_anti_replay(tmp_path, sample_key):
     alerts = db.get_security_alerts()
     assert len(alerts) >= 1
     assert alerts[0]["alert_type"] == "REPLAY_ATTACK"
+
+
+def test_sliding_window_out_of_order_and_stale(tmp_path, sample_key):
+    """Verify RFC 4303 sliding window accepts out-of-order within 64 frames and rejects stale frames."""
+    from cloud_receiver.receiver import SlidingWindowAntiReplay
+    sw = SlidingWindowAntiReplay(window_size=64)
+
+    # Initial frame
+    ok, r = sw.check_and_update("DEV-1", 100)
+    assert ok and r == "FIRST_PACKET"
+
+    # Frame 105 (window advances)
+    ok, r = sw.check_and_update("DEV-1", 105)
+    assert ok and r == "WINDOW_ADVANCED"
+
+    # Frame 102 (delayed / out-of-order, within 64 frames)
+    ok, r = sw.check_and_update("DEV-1", 102)
+    assert ok and "OUT_OF_ORDER_ACCEPTED" in r
+
+    # Replay of Frame 102
+    ok, r = sw.check_and_update("DEV-1", 102)
+    assert not ok and "DUPLICATE_IN_WINDOW" in r
+
+    # Frame 20 (older than 105 - 64 = 41)
+    ok, r = sw.check_and_update("DEV-1", 20)
+    assert not ok and "STALE_PACKET" in r

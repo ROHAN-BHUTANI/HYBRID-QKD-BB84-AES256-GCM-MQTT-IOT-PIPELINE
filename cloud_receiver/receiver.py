@@ -9,7 +9,7 @@ import sys
 import os
 import time
 import json
-from typing import Optional, Callable, Dict, Any
+from typing import Optional, Callable, Dict, Any, Tuple
 
 # Ensure project root is in python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,10 +22,48 @@ from cloud_receiver.database import DatabaseManager
 from broker.broker_bridge import get_mqtt_client, BaseMQTTClient
 
 
+class SlidingWindowAntiReplay:
+    """
+    RFC 4303 / RFC 6347 64-Packet Sliding Window Anti-Replay Filter.
+    Maintains a 64-bit bitmap of received sequence IDs per device.
+    Tolerates bounded network reordering while strictly rejecting duplicate/stale packets.
+    """
+    def __init__(self, window_size: int = 64):
+        self.window_size = window_size
+        self.windows: Dict[str, Tuple[int, int]] = {}  # device_id -> (max_seq, bitmap)
+
+    def check_and_update(self, device_id: str, seq: int) -> Tuple[bool, str]:
+        if device_id not in self.windows:
+            self.windows[device_id] = (seq, 1)
+            return True, "FIRST_PACKET"
+
+        max_seq, bitmap = self.windows[device_id]
+
+        if seq > max_seq:
+            diff = seq - max_seq
+            if diff < self.window_size:
+                bitmap = (bitmap << diff) | 1
+                bitmap &= (1 << self.window_size) - 1
+            else:
+                bitmap = 1
+            self.windows[device_id] = (seq, bitmap)
+            return True, "WINDOW_ADVANCED"
+        elif seq > max_seq - self.window_size:
+            offset = max_seq - seq
+            if (bitmap >> offset) & 1:
+                return False, f"DUPLICATE_IN_WINDOW (offset {offset} behind max #{max_seq})"
+            else:
+                bitmap |= (1 << offset)
+                self.windows[device_id] = (max_seq, bitmap)
+                return True, f"OUT_OF_ORDER_ACCEPTED (offset {offset} behind max #{max_seq})"
+        else:
+            return False, f"STALE_PACKET (seq #{seq} older than window max #{max_seq} - {self.window_size})"
+
+
 class CloudReceiver:
     """
     Cloud gateway server listening for MQTT sensor telemetry, enforcing AES-256-GCM verification,
-    anti-replay sequence tracking, and SQLite persistence.
+    RFC 64-packet sliding window anti-replay protection, and SQLite persistence.
     """
     def __init__(
         self,
@@ -38,6 +76,7 @@ class CloudReceiver:
         self.on_message_callback = on_message_callback
         self.mqtt_client: BaseMQTTClient = get_mqtt_client("cloud_receiver_sub")
         self.is_subscribed = False
+        self.anti_replay = SlidingWindowAntiReplay(window_size=64)
 
     def set_key(self, key: bytes):
         """Sets the shared AES-256 key established via BB84 QKD."""
@@ -85,40 +124,39 @@ class CloudReceiver:
             humidity = decrypted_data.get("humidity_percent")
             pressure = decrypted_data.get("pressure_hpa")
 
-            # --- Anti-Replay Verification ---
-            last_seq = self.db.get_device_sequence(device_id)
-            if reading_id is not None and reading_id <= last_seq:
-                # Replay attack detected! Sequence number has already been seen or is stale
-                print(f"[SECURITY ALERT] Replay attack detected from {device_id}! "
-                      f"Reading ID #{reading_id} <= last seen watermark #{last_seq}.")
-                self.db.log_security_alert(
-                    alert_type="REPLAY_ATTACK",
-                    details=f"Duplicate or stale sequence number #{reading_id} received (watermark: #{last_seq}).",
-                    device_id=device_id,
-                    severity="HIGH"
-                )
-                self.db.log_sensor_reading(
-                    device_id=device_id,
-                    reading_id=reading_id,
-                    sensor_timestamp=sensor_ts,
-                    temp=temp,
-                    humidity=humidity,
-                    pressure=pressure,
-                    status="REPLAY_REJECTED",
-                    dec_latency_ms=dec_latency_ms,
-                    e2e_latency_ms=e2e_latency_ms
-                )
-                if self.on_message_callback:
-                    self.on_message_callback({
-                        "status": "REPLAY_REJECTED",
-                        "device_id": device_id,
-                        "reading_id": reading_id,
-                        "e2e_latency_ms": e2e_latency_ms
-                    })
-                return
-
-            # Update sequence watermark
+            # --- RFC 4303 / 6347 Sliding Window Anti-Replay Verification ---
             if reading_id is not None:
+                is_fresh, replay_reason = self.anti_replay.check_and_update(device_id, reading_id)
+                if not is_fresh:
+                    # Replay attack detected! Sequence number has already been seen or is stale
+                    print(f"[SECURITY ALERT] Replay attack detected from {device_id}! Reason: {replay_reason}.")
+                    self.db.log_security_alert(
+                        alert_type="REPLAY_ATTACK",
+                        details=f"Sequence number #{reading_id} rejected: {replay_reason}.",
+                        device_id=device_id,
+                        severity="HIGH"
+                    )
+                    self.db.log_sensor_reading(
+                        device_id=device_id,
+                        reading_id=reading_id,
+                        sensor_timestamp=sensor_ts,
+                        temp=temp,
+                        humidity=humidity,
+                        pressure=pressure,
+                        status="REPLAY_REJECTED",
+                        dec_latency_ms=dec_latency_ms,
+                        e2e_latency_ms=e2e_latency_ms
+                    )
+                    if self.on_message_callback:
+                        self.on_message_callback({
+                            "status": "REPLAY_REJECTED",
+                            "device_id": device_id,
+                            "reading_id": reading_id,
+                            "e2e_latency_ms": e2e_latency_ms
+                        })
+                    return
+
+                # Record watermark in database
                 self.db.update_device_sequence(device_id, reading_id)
 
             # Successfully authenticated & fresh reading

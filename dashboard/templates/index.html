@@ -311,8 +311,8 @@
                 <i class="bi bi-chevron-right text-warning fs-5"></i>
                 <div class="flow-pill">
                     <i class="bi bi-hash text-warning fs-5"></i>
-                    <strong>3. SHA-256 KDF</strong>
-                    <span>256-bit Key Derived</span>
+                    <strong>3. Toeplitz Hash PA</strong>
+                    <span>2-Universal Leftover Hash</span>
                 </div>
                 <i class="bi bi-chevron-right text-warning fs-5"></i>
                 <div class="flow-pill">
@@ -523,8 +523,8 @@
                     </div>
 
                     <div class="def-card">
-                        <strong>SHA-256 Privacy Amplification (KDF):</strong>
-                        <p><strong>Hash extraction function</strong> that eliminates partial eavesdropper information and condenses raw sifted bits into a cryptographically uniform <strong>256-bit symmetric AES key</strong>.</p>
+                        <strong>2-Universal Toeplitz Privacy Amplification:</strong>
+                        <p><strong>Leftover Hash Lemma matrix multiplication</strong> over $\text{GF}(2)$ that eliminates Eve's mutual information and compresses error-corrected bits into an information-theoretic <strong>256-bit symmetric AES key</strong>.</p>
                     </div>
 
                     <div class="def-card">
@@ -573,11 +573,11 @@
                     <div class="row g-2 text-muted small">
                         <div class="col-6"><strong>Quantum Backend:</strong> <span class="text-white">IBM Qiskit Aer 0.18.2</span></div>
                         <div class="col-6"><strong>Cipher Mode:</strong> <span class="text-white">AES-256-GCM (128-bit Tag)</span></div>
-                        <div class="col-6"><strong>Initial Qubits ($N$):</strong> <span class="text-white">512 Photons</span></div>
+                        <div class="col-6"><strong>Initial Qubits ($N$):</strong> <span class="text-white">1536 Photons</span></div>
                         <div class="col-6"><strong>Nonce Size:</strong> <span class="text-white">96 bits (Cryptographically Unique)</span></div>
                         <div class="col-6"><strong>QBER Abort Threshold:</strong> <span class="text-white">11.0% (Theoretical Standard)</span></div>
                         <div class="col-6"><strong>Transport Protocol:</strong> <span class="text-white">MQTT 5.0 / Paho (Topic: iot/secure/data)</span></div>
-                        <div class="col-6"><strong>KDF Privacy Amplification:</strong> <span class="text-white">SHA-256 (32 Bytes Output)</span></div>
+                        <div class="col-6"><strong>Privacy Amplification:</strong> <span class="text-white">Toeplitz GF(2) 2-Universal Hash</span></div>
                         <div class="col-6"><strong>Storage Engine:</strong> <span class="text-white">SQLite3 (iot_cloud.db)</span></div>
                     </div>
                     <hr class="border-secondary my-3">

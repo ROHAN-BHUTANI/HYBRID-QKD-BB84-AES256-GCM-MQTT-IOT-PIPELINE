@@ -171,16 +171,25 @@ The remaining non-sampled bits form the raw secret key. While $\text{QBER} \le 0
     \item \textbf{Multi-Pass Permutation:} In passes 2 through 4, bits are shuffled using a deterministic pseudorandom permutation, and block sizes are doubled ($k_m = 2 k_{m-1}$). Any corrected error triggers backtracking to previous passes to resolve paired errors.
 \end{enumerate}
 
-\subsection{Privacy Amplification and Key Derivation}
-Public parity exchanges during reconciliation leak up to $\text{leak}_{\text{EC}}$ bits of information to Eve. To eliminate this leakage and reduce Eve's mutual information to negligible levels, we apply generalized privacy amplification using a 2-universal hash family \cite{bennett1995generalized}:
+\subsection{Privacy Amplification via 2-Universal Toeplitz Hashing}
+Public parity exchanges during Cascade reconciliation disclose up to $\text{leak}_{\text{EC}}$ bits of classical information to an eavesdropper. To completely eliminate this leakage and decouple Eve's quantum and classical mutual information from the final key, we apply 2-universal Toeplitz matrix hashing over $\text{GF}(2)$ under the Leftover Hash Lemma \cite{bennett1995generalized, tomamichel2012tight}.
+
+Let $x \in \text{GF}(2)^m$ represent the reconciled bit vector of length $m$. Alice and Bob establish an extractable key $y \in \text{GF}(2)^\ell$ of length $\ell \le m$ by computing:
 \begin{equation}
-K_{\text{AES}} = \text{HKDF-Extract-Expand}(PRK = K_{\text{reconciled}}, \text{info} = \text{``QKD-AES-256''})
+y = T \cdot x \pmod 2, \quad T_{i, j} = s_{i - j + m - 1}
 \end{equation}
-The net secret key length $\ell$ conforms to the finite-key asymptotic bound \cite{tomamichel2012tight}:
+where $T \in \text{GF}(2)^{\ell \times m}$ is a Toeplitz matrix uniquely determined by a publicly exchanged random seed vector $s \in \text{GF}(2)^{m + \ell - 1}$. 
+
+Under the finite-key Leftover Hash Lemma, the extractable secret key length $\ell$ is strictly bounded by:
 \begin{equation}
-\ell \le n_{\text{raw}} [1 - h_2(\text{QBER})] - \text{leak}_{\text{EC}} - 2 \log_2\left(\frac{1}{\epsilon_{\text{sec}}}\right)
+\ell \le \lfloor m [1 - h_2(\text{QBER})] - \text{leak}_{\text{EC}} - 2 \log_2\left(\frac{1}{\epsilon_{\text{sec}}}\right) \rfloor
+\label{eq:leftover_hash}
 \end{equation}
-yielding a 256-bit symmetric key with security parameter $\epsilon_{\text{sec}} \le 10^{-10}$.
+where $h_2(p) = -p \log_2 p - (1-p) \log_2(1-p)$ is the binary Shannon entropy and $\epsilon_{\text{sec}}$ is the cryptographic security parameter. For a standard security bound $\epsilon_{\text{sec}} = 2^{-32}$ ($2\log_2(1/\epsilon_{\text{sec}}) = 64$ bits), extracting a full 256-bit AES key ($\ell = 256$) under realistic channel noise ($\text{QBER} \approx 0.03$, $\text{leak}_{\text{EC}} \approx 30$ bits) requires:
+\begin{equation}
+m \ge \frac{256 + 30 + 64}{1 - h_2(0.03)} = \frac{350}{0.806} \approx 435 \text{ bits}
+\end{equation}
+Because sifting retains approximately $50\%$ of transmitted qubits and parameter estimation sacrifices $25\%$ of the sifted key ($m \approx 0.375 N$), an initial block size of $N \ge 1536$ qubits is mathematically required to ensure $m \approx 576$ bits, safely yielding $\ell \ge 256$ extractable bits. If $\ell < 256$, key derivation strictly aborts to prevent computational entropy inflation.
 
 ---
 
@@ -193,18 +202,21 @@ C = \text{AES-CTR}_K(IV, P), \quad T = \text{GHASH}_H(A, C) \oplus E_K(J_0)
 \end{equation}
 where $P$ is the plaintext JSON sensor reading, $IV$ is a 96-bit unique nonce, $C$ is the ciphertext, $T$ is the 128-bit authentication tag, and $A$ represents authenticated associated data.
 
-\subsection{Nonce Management and Anti-Replay Watermarking}
-In accordance with NIST SP 800-38D, reusing a nonce under the same key completely compromises GCM authentication. We enforce two strict defense-in-depth measures:
+\subsection{Nonce Lifecycle and Sliding Window Anti-Replay}
+In accordance with NIST SP 800-38D, reusing a nonce under the same key completely destroys GCM authentication. We enforce two strict defense-in-depth measures:
 \begin{enumerate}
-    \item \textbf{Cryptographic Nonce Policy:} Every transmission generates a fresh, unique 96-bit (12-byte) CSPRNG nonce via \texttt{os.urandom(12)}.
-    \item \textbf{Stateful Sequence Watermarking:} Plaintext payloads incorporate a monotonically increasing 64-bit integer \texttt{reading\_id}. Upon decryption, the Cloud Receiver queries the database sequence watermark:
+    \item \textbf{CSPRNG Nonce Policy \& Invocation Bounds:} Every transmission generates a fresh 96-bit CSPRNG nonce via \texttt{os.urandom(12)}. To satisfy NIST SP 800-38D Section 8.2.2 requirements (keeping collision probability strictly below $2^{-32}$), the client maintains a session invocation counter, triggering an automated QKD re-keying request once $100,000$ packets are transmitted under the same session key.
+    \item \textbf{RFC 4303 / RFC 6347 Sliding Window Anti-Replay:} Plaintext payloads incorporate a 64-bit integer \texttt{reading\_id}. The Cloud Receiver implements a 64-packet sliding window filter using a 64-bit bitmap. For an incoming sequence ID $S$ against highest received ID $M$:
     \begin{equation}
     \text{Decision} = 
     \begin{cases}
-    \text{ACCEPT}, & \text{reading\_id} > \text{last\_seq}_{\text{device}} \\
-    \text{REJECT (REPLAY\_ATTACK)}, & \text{reading\_id} \le \text{last\_seq}_{\text{device}}
+    \text{ACCEPT (Advance Window)}, & S > M \\
+    \text{ACCEPT (Out-of-Order)}, & M \ge S > M-64 \land \text{bit}(M-S)=0 \\
+    \text{REJECT (Duplicate Replay)}, & M \ge S > M-64 \land \text{bit}(M-S)=1 \\
+    \text{REJECT (Stale Packet)}, & S \le M - 64
     \end{cases}
     \end{equation}
+    This accommodates bounded out-of-order delivery caused by wireless IoT jitter while guaranteeing $100\%$ rejection of true replays and stale packets.
 \end{enumerate}
 
 \subsection{Encrypted Wire Format and MQTT Telemetry}
@@ -245,24 +257,25 @@ The prototype was deployed and evaluated on a standardized testbed:
 \section{Empirical Results and Performance Evaluation}
 
 \begin{table*}[t]
-\caption{EXP-1: QKD Quantum Circuit Execution Scaling and Key Post-Processing Yield ($N \in [128, 1024]$, 20 trials per scale).}
+\caption{EXP-1: QKD Quantum Circuit Execution Scaling and 2-Universal Toeplitz Key Extraction ($N \in [256, 2048]$, 15 trials per scale).}
 \centering
 \small
 \begin{tabular}{cccccc}
 \toprule
-\textbf{Qubit Block Size ($N$)} & \textbf{Sifted Bits ($\mu$)} & \textbf{Reconciled Bits ($\mu$)} & \textbf{QBER ($\mu \pm \sigma$)} & \textbf{Execution Time (ms) ($\mu \pm \sigma$)} & \textbf{Convergence Rate (\%)} \\
+\textbf{Qubit Block Size ($N$)} & \textbf{Sifted Bits ($\mu$)} & \textbf{Reconciled Bits ($\mu$)} & \textbf{QBER ($\mu \pm \sigma$)} & \textbf{Execution Time (ms) ($\mu \pm \sigma$)} & \textbf{AES-256 Extraction Rate (\%)} \\
 \midrule
-128 & 65.0 & 49.1 & 0.0000 $\pm$ 0.0000 & 6.88 $\pm$ 2.90 & 100.0\% \\
-256 & 128.0 & 96.4 & 0.0000 $\pm$ 0.0000 & 12.87 $\pm$ 1.31 & 100.0\% \\
-512 & 259.4 & 195.0 & 0.0000 $\pm$ 0.0000 & 40.76 $\pm$ 10.99 & 100.0\% \\
-1024 & 513.2 & 385.3 & 0.0000 $\pm$ 0.0000 & 120.30 $\pm$ 33.07 & 100.0\% \\
+256 & 127.6 & 96.1 & 0.0000 $\pm$ 0.0000 & 28.91 $\pm$ 22.45 & 0.0\% (Entropy Deficit) \\
+512 & 253.8 & 190.7 & 0.0000 $\pm$ 0.0000 & 141.12 $\pm$ 11.90 & 0.0\% (Entropy Deficit) \\
+1024 & 513.1 & 385.2 & 0.0000 $\pm$ 0.0000 & 398.21 $\pm$ 39.75 & 100.0\% \\
+1536 & 769.9 & 577.8 & 0.0000 $\pm$ 0.0000 & 805.06 $\pm$ 113.05 & 100.0\% \\
+2048 & 1024.3 & 768.7 & 0.0000 $\pm$ 0.0000 & 1665.14 $\pm$ 143.77 & 100.0\% \\
 \bottomrule
 \end{tabular}
 \label{tab:exp1}
 \end{table*}
 
 \begin{table}[t]
-\caption{EXP-2: QBER and Key Abort Probability vs. Eve Interception Density ($p_{\text{eve}} \in [0.0, 1.0]$, 20 trials per density).}
+\caption{EXP-2: QBER and Key Abort Probability vs. Eve Interception Density ($N=1536$, 15 trials per density).}
 \centering
 \small
 \begin{tabular}{ccccc}
@@ -270,18 +283,18 @@ The prototype was deployed and evaluated on a standardized testbed:
 $p_{\text{eve}}$ & \textbf{Empirical QBER} & \textbf{Theoretical} & \textbf{Abort Rate} & \textbf{Decision} \\
 \midrule
 0.0 & 0.0000 $\pm$ 0.0000 & 0.0000 & 0.0\% & ACCEPT \\
-0.2 & 0.0437 $\pm$ 0.0276 & 0.0500 & 0.0\% & ACCEPT \\
-0.4 & 0.0892 $\pm$ 0.0331 & 0.1000 & 25.0\% & ABORT \\
-0.6 & 0.1442 $\pm$ 0.0356 & 0.1500 & 80.0\% & ABORT \\
-0.8 & 0.1859 $\pm$ 0.0510 & 0.2000 & 100.0\% & ABORT \\
-1.0 & 0.2351 $\pm$ 0.0475 & 0.2500 & 100.0\% & ABORT \\
+0.2 & 0.0469 $\pm$ 0.0167 & 0.0500 & 0.0\% & ACCEPT \\
+0.4 & 0.1002 $\pm$ 0.0144 & 0.1000 & 20.0\% & ABORT \\
+0.6 & 0.1427 $\pm$ 0.0164 & 0.1500 & 100.0\% & ABORT \\
+0.8 & 0.2121 $\pm$ 0.0289 & 0.2000 & 100.0\% & ABORT \\
+1.0 & 0.2489 $\pm$ 0.0330 & 0.2500 & 100.0\% & ABORT \\
 \bottomrule
 \end{tabular}
 \label{tab:exp2}
 \end{table}
 
 \begin{table}[t]
-\caption{EXP-3: Channel Depolarizing Noise vs. Cascade Reconciliation Success ($N=512$, 15 trials per noise level).}
+\caption{EXP-3: Channel Depolarizing Noise vs. Cascade Reconciliation Success ($N=1536$, 12 trials per noise level).}
 \centering
 \small
 \begin{tabular}{cccc}
@@ -289,27 +302,27 @@ $p_{\text{eve}}$ & \textbf{Empirical QBER} & \textbf{Theoretical} & \textbf{Abor
 \textbf{Noise ($\lambda$)} & \textbf{Measured QBER} & \textbf{Parity Leakage (Bits)} & \textbf{Success Rate} \\
 \midrule
 0.00 & 0.0000 $\pm$ 0.0000 & 0.0 & 100.0\% \\
-0.02 & 0.0111 $\pm$ 0.0131 & 30.7 & 100.0\% \\
-0.05 & 0.0426 $\pm$ 0.0330 & 65.8 & 93.3\% \\
-0.08 & 0.0670 $\pm$ 0.0327 & 82.7 & 93.3\% \\
-0.10 & 0.0664 $\pm$ 0.0392 & 86.7 & 86.7\% \\
-0.12 & 0.0961 $\pm$ 0.0398 & 70.1 & 66.7\% \\
+0.02 & 0.0096 $\pm$ 0.0063 & 102.6 & 100.0\% \\
+0.05 & 0.0244 $\pm$ 0.0106 & 223.2 & 100.0\% \\
+0.08 & 0.0413 $\pm$ 0.0133 & 277.6 & 100.0\% \\
+0.10 & 0.0507 $\pm$ 0.0140 & 305.8 & 100.0\% \\
+0.12 & 0.0576 $\pm$ 0.0214 & 348.5 & 100.0\% \\
 \bottomrule
 \end{tabular}
 \label{tab:exp3}
 \end{table}
 
-\subsection{EXP-1: Quantum Circuit Scaling and Sifting Yield}
-Table \ref{tab:exp1} presents execution metrics as qubit block size scales from $N=128$ to $N=1024$. The sifting yield strictly adheres to the theoretical $50\%$ probability: $N=128 \to 65.0$ bits, $N=256 \to 128.0$ bits, $N=512 \to 259.4$ bits, and $N=1024 \to 513.2$ bits. Reconciled bits constitute exactly $75\%$ of the sifted key after deducting the 25\% sample estimation fraction ($49.1, 96.4, 195.0, 385.3$ bits respectively). Simulation execution latency scales moderately from $6.88 \pm 2.90$ ms at $N=128$ to $120.30 \pm 33.07$ ms at $N=1024$, remaining well within acceptable limits for periodic background key establishment.
+\subsection{EXP-1: Quantum Circuit Scaling and Finite-Key Extraction}
+Table \ref{tab:exp1} presents execution metrics and extraction success as qubit block size scales from $N=256$ to $N=2048$. In strict conformance with the Leftover Hash Lemma, block sizes of $N=256$ ($m \approx 96.1$ bits) and $N=512$ ($m \approx 190.7$ bits) produce an AES-256 extraction rate of $0.0\%$, because their finite-key net extractable entropy ($\ell \le m - 64$) is mathematically incapable of supporting a 256-bit key. At $N=1024$ ($m \approx 385.2$ bits), extractable entropy crosses the 256-bit threshold ($\ell \approx 321$ bits), reaching a $100.0\%$ extraction rate. For production settings, $N=1536$ ($m \approx 577.8$ bits, $\ell \approx 513$ bits) provides a robust margin accommodating channel error correction leakage while executing in $805.06 \pm 113.05$ ms.
 
 \subsection{EXP-2: Intercept-Resend Attack Detection}
-Table \ref{tab:exp2} and Figure \ref{fig:eve} quantify QBER growth across Eve interception probabilities $p_{\text{eve}} \in [0.0, 1.0]$. The empirical error rate tracks the theoretical $p_{\text{eve}}/4$ expectation with high statistical fidelity: $p_{\text{eve}}=0.2 \to \text{QBER} = 0.0437$ (theo $0.05$), $p_{\text{eve}}=0.6 \to \text{QBER} = 0.1442$ (theo $0.15$), and $p_{\text{eve}}=1.0 \to \text{QBER} = 0.2351$ (theo $0.25$). For $p_{\text{eve}} \le 0.2$, the sample QBER remains below 11\%, allowing key generation to proceed. At $p_{\text{eve}} = 0.4$, random fluctuations push 25\% of trials beyond 11\%, triggering aborts. For $p_{\text{eve}} \ge 0.8$, the detection and abort rate reaches 100\%, confirming that significant eavesdropping is impossible without detection.
+Table \ref{tab:exp2} and Figure \ref{fig:eve} quantify QBER growth across Eve interception probabilities $p_{\text{eve}} \in [0.0, 1.0]$ with $N=1536$. The empirical error rate tracks the theoretical $p_{\text{eve}}/4$ expectation with exceptional fidelity: $p_{\text{eve}}=0.2 \to \text{QBER} = 0.0469 \pm 0.0167$ (theoretical $0.0500$), $p_{\text{eve}}=0.4 \to \text{QBER} = 0.1002 \pm 0.0144$ (theoretical $0.1000$), $p_{\text{eve}}=0.6 \to \text{QBER} = 0.1427 \pm 0.0164$ (theoretical $0.1500$), and $p_{\text{eve}}=1.0 \to \text{QBER} = 0.2489 \pm 0.0330$ (theoretical $0.2500$). Key abort rate reaches $100\%$ for all $p_{\text{eve}} \ge 0.6$, confirming that active quantum eavesdropping cannot bypass threshold detection.
 
-\subsection{EXP-3: Channel Noise Resilience and Cascade Convergence}
-Table \ref{tab:exp3} reports the behavior of the Cascade information reconciliation algorithm under depolarizing channel noise $\lambda \in [0.0, 0.12]$. Up to $\lambda = 0.02$, reconciliation achieves 100\% convergence with minimal parity leakage (30.7 bits). At moderate noise levels ($\lambda = 0.05$ to $0.08$), the convergence rate remains high at 93.3\% with an average leakage of 65.8 to 82.7 bits. When noise exceeds $\lambda = 0.10$, frequent sample QBER spikes breach the 11\% cutoff, safely preventing key agreement over severely degraded channels.
+\subsection{EXP-3: Uniform Channel Noise Resilience and Cascade Convergence}
+Table \ref{tab:exp3} reports the behavior of the Cascade information reconciliation algorithm under depolarizing channel noise $\lambda \in [0.0, 0.12]$ with uniform single-photon transit identity gates. Across all tested noise levels up to $\lambda = 0.12$, Cascade achieved a $100.0\%$ error-correction success rate, eliminating all residual bit errors while accurately measuring parity disclosure leakage ($102.6$ to $348.5$ bits) deducted during Toeplitz privacy amplification.
 
 \subsection{EXP-4: AES-256-GCM Latency and Cryptographic Throughput}
-Table \ref{tab:exp4} evaluates encryption and decryption performance across typical IoT payload sizes from 32 bytes to 2048 bytes (50 trials per scale). For payloads between 64 and 1024 bytes, encryption latency remains virtually constant between $0.0073$ ms and $0.0134$ ms, and decryption latency between $0.0066$ ms and $0.0105$ ms. This yields cryptographic processing throughputs ranging from $8.5$ MB/s for 64-byte telemetry frames to over $109.8$ MB/s for 2048-byte bulk payloads, demonstrating that AES-256-GCM introduces negligible computational overhead on edge nodes.
+Table \ref{tab:exp4} evaluates encryption and decryption performance across typical IoT payload sizes from 32 bytes to 2048 bytes (50 trials per scale). For payloads between 64 and 1024 bytes, encryption latency remains virtually constant between $0.0167$ ms and $0.0386$ ms, and decryption latency between $0.0151$ ms and $0.0206$ ms. This yields cryptographic processing throughputs ranging from $2.0$ MB/s for 64-byte telemetry frames to over $93.0$ MB/s for 2048-byte bulk payloads, demonstrating that AES-256-GCM introduces negligible computational overhead on edge nodes.
 
 \begin{table}[t]
 \caption{EXP-4: AES-256-GCM Latency and Throughput (50 trials/scale).}
@@ -319,13 +332,13 @@ Table \ref{tab:exp4} evaluates encryption and decryption performance across typi
 \toprule
 \textbf{Payload} & \textbf{Enc Time (ms)} & \textbf{Dec Time (ms)} & \textbf{Enc (KB/s)} & \textbf{Dec (KB/s)} \\
 \midrule
-32 B & 0.4863 $\pm$ 3.3678 & 0.0182 $\pm$ 0.0691 & 64.3 & 1,717.0 \\
-64 B & 0.0073 $\pm$ 0.0015 & 0.0066 $\pm$ 0.0011 & 8,561.6 & 9,469.7 \\
-128 B & 0.0112 $\pm$ 0.0139 & 0.0078 $\pm$ 0.0028 & 11,160.7 & 16,025.6 \\
-256 B & 0.0113 $\pm$ 0.0073 & 0.0100 $\pm$ 0.0045 & 22,123.9 & 25,000.0 \\
-512 B & 0.0114 $\pm$ 0.0013 & 0.0105 $\pm$ 0.0038 & 43,859.6 & 47,619.0 \\
-1024 B & 0.0134 $\pm$ 0.0099 & 0.0105 $\pm$ 0.0019 & 74,626.9 & 95,238.1 \\
-2048 B & 0.0182 $\pm$ 0.0118 & 0.0196 $\pm$ 0.0209 & 109,890.1 & 102,040.8 \\
+32 B & 0.0917 $\pm$ 0.5356 & 0.0150 $\pm$ 0.0049 & 340.8 & 2,083.3 \\
+64 B & 0.0312 $\pm$ 0.0992 & 0.0151 $\pm$ 0.0043 & 2,003.2 & 4,139.1 \\
+128 B & 0.0222 $\pm$ 0.0260 & 0.0163 $\pm$ 0.0015 & 5,630.6 & 7,668.7 \\
+256 B & 0.0167 $\pm$ 0.0009 & 0.0154 $\pm$ 0.0044 & 14,970.1 & 16,233.8 \\
+512 B & 0.0386 $\pm$ 0.0952 & 0.0206 $\pm$ 0.0148 & 12,953.4 & 24,271.8 \\
+1024 B & 0.0172 $\pm$ 0.0018 & 0.0204 $\pm$ 0.0262 & 58,139.5 & 49,019.6 \\
+2048 B & 0.0215 $\pm$ 0.0379 & 0.0154 $\pm$ 0.0053 & 93,023.3 & 129,870.1 \\
 \bottomrule
 \end{tabular}
 \label{tab:exp4}
@@ -351,7 +364,7 @@ Auth Tag Corruption & 50 & 50 & 100.0\% & $2^{-128}$ Bound \\
 Table \ref{tab:exp5} reports results from 150 injected fault injection attacks (50 trials per attack vector). In all 50 ciphertext bit-flip trials, 50 nonce corruption trials, and 50 authentication tag tamper trials, the Cloud Receiver's GMAC verification raised an \texttt{InvalidTag} exception, achieving a 100.0\% tamper detection rate. No corrupted packet was ever decrypted or committed to the database.
 
 \subsection{EXP-6: End-to-End Latency Evaluation}
-Over 50 full pipeline transmissions, the mean end-to-end telemetry transit latency (incorporating JSON serialization, AES-256-GCM encryption, queue dispatch, Cloud Receiver worker dequeuing, GCM tag verification, decryption, sequence watermark validation, and SQLite WAL write commit) was $362.33 \pm 185.47$ ms (95\% CI: [309.31, 415.36] ms). Cryptographic encryption operations required only $0.1259 \pm 0.3050$ ms, representing just 0.03\% of total transit time.
+Over 50 full pipeline transmissions, the mean end-to-end telemetry transit latency (incorporating JSON serialization, AES-256-GCM encryption, queue dispatch, Cloud Receiver worker dequeuing, GCM tag verification, decryption, sequence watermark validation, and SQLite WAL write commit) was $180.48 \pm 103.28$ ms (95\% CI: [150.64, 210.33] ms). Cryptographic encryption operations required only $0.0745 \pm 0.0158$ ms, representing just 0.04\% of total transit time.
 
 \subsection{EXP-7: Comparative Baseline Evaluation}
 Table \ref{tab:exp7} summarizes the comparative trade-offs between Plaintext MQTT, Pre-Shared Key (PSK) AES-256-GCM, Post-Quantum ML-KEM-512 (Kyber) \cite{nist2024fips203}, and our proposed Hybrid QKD architecture. While Plaintext offers zero overhead, it lacks confidentiality and tamper detection. PSK achieves high performance but suffers from static key compromise vulnerabilities. ML-KEM-512 provides quantum resistance based on computational hardness but incurs a 768-byte public-key/ciphertext overhead per handshake over the classical channel. In contrast, the proposed Hybrid QKD architecture establishes unconditional information-theoretic security over the quantum channel with zero in-band classical key transmission overhead.

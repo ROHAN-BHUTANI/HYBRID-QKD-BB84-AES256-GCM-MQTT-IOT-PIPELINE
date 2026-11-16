@@ -15,9 +15,9 @@ import config
 
 def test_qkd_to_aes_integration(tmp_path):
     """Verify BB84 negotiated key operates seamlessly with IoT client and cloud receiver."""
-    # 1. Run BB84 key agreement
+    # 1. Run BB84 key agreement with N=1536 to yield >= 256 extractable bits under Leftover Hash Lemma
     sim = BB84Simulator()
-    res = sim.run(num_qubits=256, enable_eve=False)
+    res = sim.run(num_qubits=1536, enable_eve=False)
     assert res.is_valid is True
     assert res.alice_key is not None
 

@@ -40,15 +40,17 @@ class ScientificExperimentHarness:
         self.qkd_sim = BB84Simulator()
         self.process = psutil.Process(os.getpid())
 
-    def run_exp1_qkd_scaling(self, qubit_sizes: List[int] = [128, 256, 512, 1024], repetitions: int = 20):
-        """EXP-1: Evaluates QKD circuit execution time and sifting yield across qubit block sizes."""
-        print("\n[EXP-1] Executing QKD Circuit Scaling Experiment...")
+    def run_exp1_qkd_scaling(self, qubit_sizes: List[int] = [256, 512, 1024, 1536, 2048], repetitions: int = 15):
+        """EXP-1: Evaluates QKD circuit execution time, sifting yield, and 2-Universal Toeplitz key extraction."""
+        print("\n[EXP-1] Executing QKD Circuit Scaling & Toeplitz PA Experiment...")
         records = []
         for n in qubit_sizes:
             for trial in range(1, repetitions + 1):
                 mem_before = self.process.memory_info().rss / (1024 * 1024)
                 res = self.qkd_sim.run(num_qubits=n, enable_eve=False)
                 mem_after = self.process.memory_info().rss / (1024 * 1024)
+
+                has_256_key = 1 if (res.alice_key is not None and len(res.alice_key) == 32) else 0
 
                 records.append({
                     "experiment": "EXP-1",
@@ -58,6 +60,7 @@ class ScientificExperimentHarness:
                     "reconciled_bits": res.reconciled_length,
                     "qber": round(res.qber, 4),
                     "is_valid": 1 if res.is_valid else 0,
+                    "key_derived_256bit": has_256_key,
                     "exec_time_ms": round(res.execution_time_ms, 3),
                     "memory_delta_mb": round(max(0.0, mem_after - mem_before), 3)
                 })
@@ -70,14 +73,14 @@ class ScientificExperimentHarness:
         print(f"  -> EXP-1 completed: {len(records)} trials saved to {out_path}")
         return records
 
-    def run_exp2_eve_interception(self, probabilities: List[float] = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0], repetitions: int = 20):
-        """EXP-2: Measures QBER and key abort rate vs Eve interception density."""
-        print("\n[EXP-2] Executing Eve Interception Density Sweep...")
+    def run_exp2_eve_interception(self, probabilities: List[float] = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0], repetitions: int = 15):
+        """EXP-2: Measures QBER and key abort rate vs Eve interception density with N=1536."""
+        print("\n[EXP-2] Executing Eve Interception Density Sweep (N=1536)...")
         records = []
         for p in probabilities:
             for trial in range(1, repetitions + 1):
                 enable_eve = (p > 0.0)
-                res = self.qkd_sim.run(num_qubits=512, enable_eve=enable_eve, eve_prob=p)
+                res = self.qkd_sim.run(num_qubits=1536, enable_eve=enable_eve, eve_prob=p)
 
                 records.append({
                     "experiment": "EXP-2",
@@ -97,13 +100,13 @@ class ScientificExperimentHarness:
         print(f"  -> EXP-2 completed: {len(records)} trials saved to {out_path}")
         return records
 
-    def run_exp3_channel_noise(self, noise_levels: List[float] = [0.0, 0.02, 0.05, 0.08, 0.10, 0.12], repetitions: int = 15):
-        """EXP-3: Evaluates QBER and reconciliation success under depolarizing noise."""
-        print("\n[EXP-3] Executing Channel Noise & Reconciliation Sweep...")
+    def run_exp3_channel_noise(self, noise_levels: List[float] = [0.0, 0.02, 0.05, 0.08, 0.10, 0.12], repetitions: int = 12):
+        """EXP-3: Evaluates QBER and reconciliation success under depolarizing noise with N=1536."""
+        print("\n[EXP-3] Executing Channel Noise & Reconciliation Sweep (N=1536)...")
         records = []
         for lmbda in noise_levels:
             for trial in range(1, repetitions + 1):
-                res = self.qkd_sim.run(num_qubits=512, enable_eve=False, noise_param=lmbda)
+                res = self.qkd_sim.run(num_qubits=1536, enable_eve=False, noise_param=lmbda)
                 records.append({
                     "experiment": "EXP-3",
                     "noise_param": lmbda,

@@ -49,12 +49,19 @@ class IoTSensorClient:
 
         self.mqtt_client: BaseMQTTClient = get_mqtt_client(f"{device_id}_pub")
         self.connected = False
+        self.key_invocations = 0
+        self.max_key_invocations = 100_000  # NIST SP 800-38D invocation bound
 
     def set_key(self, key: bytes):
-        """Updates the shared AES-256 key established via BB84 QKD."""
+        """Updates the shared AES-256 key established via BB84 QKD and resets invocation counter."""
         if len(key) != config.AES_KEY_SIZE_BYTES:
             raise ValueError(f"AES key must be {config.AES_KEY_SIZE_BYTES} bytes.")
         self.aes_key = key
+        self.key_invocations = 0
+
+    def is_rekey_needed(self) -> bool:
+        """Checks if key invocation count has exceeded NIST SP 800-38D threshold."""
+        return self.key_invocations >= self.max_key_invocations
 
     def connect(self):
         """Connects to the MQTT broker."""
@@ -103,6 +110,8 @@ class IoTSensorClient:
         """
         if not self.aes_key:
             raise RuntimeError("Cannot publish: AES-256 key not set. Run BB84 first.")
+
+        self.key_invocations += 1
 
         if reading_dict is None:
             reading_dict = self.generate_sensor_reading()

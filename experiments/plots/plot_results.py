@@ -69,6 +69,7 @@ def plot_fig1_scaling(raw_dir: str, out_dir: str):
 
     p1 = ax1.plot(qubits, sifted_m, 'o-', color='#1f77b4', label='Sifted Key (bits)')
     p2 = ax1.plot(qubits, reconciled_m, 's--', color='#2ca02c', label='Reconciled Key (bits)')
+    p4 = ax1.axhline(256, color='black', linestyle=':', linewidth=1.5, label='256-bit AES Bound')
     p3 = ax2.errorbar(qubits, times_m, yerr=times_s, fmt='^-', color='#d62728', capsize=4, label='Execution Time (ms)')
 
     ax1.set_xlabel("Qubit Block Size ($N$)")
@@ -76,7 +77,7 @@ def plot_fig1_scaling(raw_dir: str, out_dir: str):
     ax2.set_ylabel("Execution Time (ms)", color='#d62728')
     ax1.grid(True)
 
-    lines = p1 + p2 + [p3]
+    lines = p1 + p2 + [p4] + [p3]
     labels = [l.get_label() for l in lines]
     ax1.legend(lines, labels, loc="upper left")
 
