@@ -1,0 +1,12 @@
+DefID,Category,Description,Severity,Status,Resolution,Gate_Impact
+DEF-001,Environment,pytest DLL collection failure for Qiskit Aer on Windows sandbox context,MEDIUM,OPEN,Run tests via direct python invocation (verify_bb84.py) — not a code bug,None
+DEF-002,Scientific,Eve intercept-resend T12 at N=200 did not abort (QBER=0.0833),LOW,ACCEPTABLE,Expected finite-key behavior with small N; production N=1536 would abort reliably,Gate 4
+DEF-003,Security,Classical authentication in BB84 assumed but not implemented,HIGH,DOCUMENTED LIMITATION,Disclosed in manuscript threat model and system assumptions,Gate 3
+DEF-004,Implementation,MQTT tested in simulated queue mode only — no real Mosquitto broker test,MEDIUM,DOCUMENTED SCOPE,config.USE_SIMULATED_BROKER=True; real MQTT requires Mosquitto installation,Gate 3
+DEF-005,Scientific,Eve re-preparation uses Qiskit measurement collapse (not explicit state reset),LOW,ACCEPTABLE,Qiskit mid-circuit measurement correctly collapses state; subsequent H simulates re-prep,Gate 1
+DEF-006,Reproducibility,No provenance metadata (timestamp/git_hash/seed) in experiment CSVs,MEDIUM,DOCUMENTED,CSVs from bdb61ef batch; metadata unavailable post-hoc,Gate 4
+DEF-007,Data Quality,EXP-7 ML-KEM-512 comparison value (2.15ms) provenance unclear,HIGH,REQUIRES DISCLOSURE,Must be cited as reference implementation benchmark in manuscript,Gate 4
+DEF-008,Data Quality,EXP-6 e2e latency reflects queue accumulation artifact not real network RTT,HIGH,REQUIRES DISCLOSURE,Must be disclosed in manuscript; re-title as queue-side processing latency,Gate 4
+DEF-009,Implementation,AES-GCM warmup outliers in EXP-4 (Trial 1 at 32B: 3.8033ms vs steady-state 0.015ms),LOW,REQUIRES DISCLOSURE,Exclude trial 1 from statistical summaries or note as JIT warmup,Gate 4
+DEF-010,Security,Eve intercept mask uses random.random() not secrets module,LOW,ACCEPTABLE,Simulation-only use; mask randomness not cryptographically sensitive,Gate 2
+DEF-011,Security,Anti-replay window state is in-memory only (not persisted across restarts),MEDIUM,DOCUMENTED LIMITATION,Noted; production would need DB-backed persistence,Gate 2

@@ -1,0 +1,11 @@
+ExpID,Filename,Rows,Execution_Batch,Git_Commit,Has_Timestamp,Has_Seed,Has_Git_Hash,Data_Category,Verified_Consistent
+EXP-1,exp1_qkd_scaling.csv,76,EXP-BATCH-2,bdb61ef,NO,NO,NO,D (Historical),YES
+EXP-2,exp2_eve_density.csv,91,EXP-BATCH-2,bdb61ef,NO,NO,NO,D (Historical),YES
+EXP-3,exp3_channel_noise.csv,73,EXP-BATCH-2,bdb61ef,NO,NO,NO,D (Historical),YES
+EXP-4,exp4_crypto_throughput.csv,351,EXP-BATCH-2,bdb61ef,NO,NO,NO,D (Historical),YES
+EXP-5,exp5_tamper_detection.csv,200,EXP-BATCH-2,bdb61ef,NO,NO,NO,D (Historical),YES
+EXP-6,exp6_e2e_latency.csv,51,EXP-BATCH-2,bdb61ef,NO,NO,NO,D (Historical),YES (see DEF-008 queue artifact)
+EXP-7,exp7_baseline_comparison.csv,4,EXP-BATCH-2,bdb61ef,NO,NO,NO,D/B (Historical/Reference),PARTIAL (see DEF-007 ML-KEM reference)
+Phase-A,verify_phase_a.py output,45,Current Session,235b3d7+,YES,NO,YES,A (Actual Execution),YES (Live circuit execution)
+Phase-A-BB84,verify_bb84.py output,11,Current Session,235b3d7+,YES,NO,YES,A (Actual Execution),YES (Live module tests)
+Crypto-Tests,pytest test_crypto.py & test_security.py,9,Current Session,235b3d7+,YES,NO,YES,A (Actual Execution),YES (Pass 9/9 in 0.55s)
