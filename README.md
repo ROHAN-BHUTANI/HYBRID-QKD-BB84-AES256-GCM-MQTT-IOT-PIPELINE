@@ -125,5 +125,21 @@ Output CSV files produced:
    - Average packet delivery, verification, and database persistence latency: $< 1.0$ ms.
 
 ---
+
+## 5. Autonomous Key Lifecycle & Rekeying (TSK-01)
+
+The pipeline implements an autonomous finite state machine (`qkd.key_lifecycle.KeyLifecycleManager`) enforcing NIST SP 800-38D invocation bounds:
+
+* **State Machine:** `UNINITIALIZED` -> `KEY_ESTABLISHED` -> `ACTIVE` -> `REKEY_REQUIRED` -> `REKEYING` -> `ACTIVE_NEW_KEY` (or `KEY_EXPIRED` / `SECURITY_ABORT`).
+* **Pre-Encryption Guard:** Every frame call to `publish_reading()` verifies key validity. Encryption under exhausted or retired keys is strictly prohibited (`KeyExpirationError`).
+* **In-Flight Grace Period:** Receiver maintains an inbound rollover window for in-flight packets across broker queues during key rotation.
+* **Audit Logging:** Every transition is recorded in SQLite `key_lifecycle_events` and sensor readings are stamped with `key_id`.
+
+To run the autonomous re-keying demonstration:
+```bash
+python -c "import run_pipeline; run_pipeline.run_rekey_demo(max_key_invocations=3, total_frames=8)"
+```
+
+---
 *Created for B.Tech Major Project Phase 2 Prototype Submission (November 2026).*
 

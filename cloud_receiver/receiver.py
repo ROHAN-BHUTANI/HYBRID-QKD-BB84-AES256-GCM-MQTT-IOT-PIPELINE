@@ -9,6 +9,7 @@ import sys
 import os
 import time
 import json
+import threading
 from typing import Optional, Callable, Dict, Any, Tuple
 
 # Ensure project root is in python path
@@ -77,12 +78,39 @@ class CloudReceiver:
         self.mqtt_client: BaseMQTTClient = get_mqtt_client("cloud_receiver_sub")
         self.is_subscribed = False
         self.anti_replay = SlidingWindowAntiReplay(window_size=64)
+        self._active_key_id: Optional[str] = None
+        self._key_lock = threading.Lock()
+        self._previous_keys: list = []  # Inbound rollover window for in-flight packets
 
     def set_key(self, key: bytes):
         """Sets the shared AES-256 key established via BB84 QKD."""
         if len(key) != config.AES_KEY_SIZE_BYTES:
             raise ValueError(f"AES key must be {config.AES_KEY_SIZE_BYTES} bytes.")
-        self.aes_key = key
+        with self._key_lock:
+            self.aes_key = key
+
+    def rotate_key(self, new_key_id: str, new_key: bytes, session_meta: dict = None):
+        """
+        Thread-safe key rotation callback — called by KeyLifecycleManager when
+        a new BB84 session completes successfully.
+
+        Maintains a bounded inbound rollover window (grace period) for in-flight
+        packets that were in transit across the broker queue during renegotiation.
+        """
+        if len(new_key) != config.AES_KEY_SIZE_BYTES:
+            raise ValueError(f"Rotated key must be {config.AES_KEY_SIZE_BYTES} bytes.")
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        with self._key_lock:
+            old_key_id = self._active_key_id or "NONE"
+            if self.aes_key and self.aes_key != new_key:
+                self._previous_keys.append(self.aes_key)
+                if len(self._previous_keys) > 5:
+                    self._previous_keys.pop(0)
+            self.aes_key = new_key
+            self._active_key_id = new_key_id
+        _log.info("[CloudReceiver] Key rotated: %s -> %s", old_key_id, new_key_id)
+        print(f"  [CloudReceiver] KEY ROTATED: {old_key_id} -> {new_key_id}")
 
     def start(self):
         """Starts subscription to the MQTT sensor topic."""
@@ -107,16 +135,39 @@ class CloudReceiver:
         sent_time_ns = envelope.get("timestamp_ns", recv_time_ns)
         e2e_latency_ms = max(0.0, (recv_time_ns - sent_time_ns) / 1_000_000.0)
         device_id = envelope.get("device_id", "UNKNOWN_DEVICE")
+        # Read envelope key_id stamped by sensor client (informational only)
+        envelope_key_id = envelope.get("key_id")
 
-        if not self.aes_key:
+        with self._key_lock:
+            current_key = self.aes_key
+            current_key_id = self._active_key_id
+
+        if not current_key:
             print(f"[CloudReceiver Warning] Key not set. Dropping message from {device_id}.")
             return
 
         try:
-            # Decrypt with AES-256-GCM and verify 128-bit authentication tag
-            decrypted_data, dec_latency_ms = CryptoUtils.decrypt_payload(
-                self.aes_key, envelope
-            )
+            # Decrypt with AES-256-GCM and verify 128-bit authentication tag.
+            # If current key fails, check inbound rollover window for in-flight packets.
+            keys_to_try = [current_key]
+            with self._key_lock:
+                keys_to_try.extend(reversed(self._previous_keys))
+
+            decrypted_data = None
+            dec_latency_ms = 0.0
+            last_tag_error = None
+
+            for candidate_key in keys_to_try:
+                try:
+                    decrypted_data, dec_latency_ms = CryptoUtils.decrypt_payload(
+                        candidate_key, envelope
+                    )
+                    break
+                except InvalidTag as it:
+                    last_tag_error = it
+
+            if decrypted_data is None and last_tag_error is not None:
+                raise last_tag_error
 
             reading_id = decrypted_data.get("reading_id")
             sensor_ts = decrypted_data.get("timestamp", "")
@@ -145,7 +196,8 @@ class CloudReceiver:
                         pressure=pressure,
                         status="REPLAY_REJECTED",
                         dec_latency_ms=dec_latency_ms,
-                        e2e_latency_ms=e2e_latency_ms
+                        e2e_latency_ms=e2e_latency_ms,
+                        key_id=envelope_key_id,
                     )
                     if self.on_message_callback:
                         self.on_message_callback({
@@ -169,7 +221,8 @@ class CloudReceiver:
                 pressure=pressure,
                 status="AUTHENTICATED",
                 dec_latency_ms=dec_latency_ms,
-                e2e_latency_ms=e2e_latency_ms
+                e2e_latency_ms=e2e_latency_ms,
+                key_id=envelope_key_id,
             )
 
             if self.on_message_callback:
@@ -177,7 +230,8 @@ class CloudReceiver:
                     "status": "AUTHENTICATED",
                     "data": decrypted_data,
                     "dec_latency_ms": dec_latency_ms,
-                    "e2e_latency_ms": e2e_latency_ms
+                    "e2e_latency_ms": e2e_latency_ms,
+                    "key_id": envelope_key_id,
                 })
 
         except InvalidTag:
@@ -199,7 +253,8 @@ class CloudReceiver:
                 pressure=None,
                 status="TAMPERED",
                 dec_latency_ms=dec_latency_ms,
-                e2e_latency_ms=e2e_latency_ms
+                e2e_latency_ms=e2e_latency_ms,
+                key_id=envelope_key_id,
             )
 
             if self.on_message_callback:

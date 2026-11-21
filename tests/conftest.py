@@ -9,8 +9,27 @@ import sys
 # Ensure project root is in python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Pre-import AerSimulator to initialize C++ runtime / DLL handles early in process lifecycle
+try:
+    from qiskit_aer import AerSimulator
+except Exception:
+    pass
+
 import config
 from cloud_receiver.database import DatabaseManager
+
+
+@pytest.fixture(autouse=True)
+def reset_simulated_broker():
+    """
+    Reset the SimulatedBroker singleton's subscriber table before each test.
+    Prevents stale subscriptions from prior tests from receiving messages
+    encrypted under a different key and generating spurious tampering alerts.
+    """
+    from broker.broker_bridge import SimulatedBroker
+    SimulatedBroker.reset_for_testing()
+    yield
+    SimulatedBroker.reset_for_testing()
 
 
 @pytest.fixture

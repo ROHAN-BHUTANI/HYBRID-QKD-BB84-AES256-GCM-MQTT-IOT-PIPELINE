@@ -29,6 +29,111 @@ from cloud_receiver.receiver import CloudReceiver
 from cloud_receiver.database import DatabaseManager
 
 
+def run_rekey_demo(max_key_invocations: int = 3, total_frames: int = 8):
+    """
+    TSK-01 Demonstration: Autonomous QKD Key Renegotiation.
+
+    Publishes `total_frames` sensor readings with max_key_invocations=N per key.
+    When the invocation limit is reached, a new BB84 session automatically
+    executes and the new key is installed transparently.
+
+    NOTE: This is a software simulation. The receiver learns the new key via the
+    same in-process shared-state channel used by the simulated broker transport.
+    """
+    print("=" * 78)
+    print("  TSK-01: AUTONOMOUS QKD KEY RENEGOTIATION DEMONSTRATION")
+    print(f"  Key invocation limit: {max_key_invocations} frames per key")
+    print(f"  Total frames to publish: {total_frames}")
+    print("=" * 78)
+
+    db = DatabaseManager()
+
+    # Initial BB84 session
+    print(f"\n[REKEY DEMO] Running initial BB84 QKD session ({config.NUM_QUBITS} qubits)...")
+    sim = BB84Simulator()
+    initial_result = sim.run(num_qubits=config.NUM_QUBITS, enable_eve=False)
+
+    if not initial_result.is_valid or not initial_result.alice_key:
+        print("[REKEY DEMO] Initial QKD session failed. Aborting demo.")
+        return
+
+    print(f"  -> Initial key established. QBER={initial_result.qber*100:.2f}%")
+
+    # Set up receiver with rotation callback
+    received_events = []
+
+    def on_callback(ev):
+        received_events.append(ev)
+
+    receiver = CloudReceiver(
+        aes_key=initial_result.bob_key,
+        db_manager=db,
+        on_message_callback=on_callback,
+    )
+    receiver._active_key_id = "INITIAL"
+    receiver.start()
+
+    def on_key_rotated(new_key_id, new_key_bytes, session_meta):
+        """Receiver learns new key when lifecycle manager rotates it."""
+        receiver.rotate_key(new_key_id, new_key_bytes, session_meta)
+        print(f"\n  [REKEY DEMO] >> Receiver key rotated to {new_key_id}")
+        print(f"  [REKEY DEMO]    QBER={session_meta.get('qber', 0.0)*100:.2f}%  "
+              f"PA output={session_meta.get('pa_output_bits', 0)} bits\n")
+        db.log_qkd_session(
+            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            num_qubits=session_meta.get("num_qubits", config.NUM_QUBITS),
+            sifted_len=session_meta.get("reconciled_bits", 0),
+            qber=session_meta.get("qber", 0.0),
+            threshold=config.QBER_THRESHOLD,
+            is_valid=session_meta.get("is_valid", True),
+            eve_present=False,
+            exec_ms=session_meta.get("execution_time_ms", 0.0),
+            key_preview=new_key_id,
+        )
+
+    sensor = IoTSensorClient(
+        device_id="REKEY-DEMO-SENSOR",
+        aes_key=initial_result.alice_key,
+        initial_seq=0,
+        max_key_invocations=max_key_invocations,
+        on_key_rotated=on_key_rotated,
+        db_logger=db.log_key_lifecycle_event,
+    )
+    sensor.connect()
+    print(f"\n[REKEY DEMO] Publishing {total_frames} frames with limit={max_key_invocations}...\n")
+
+    for i in range(1, total_frames + 1):
+        try:
+            env, enc_ms = sensor.publish_reading()
+            print(f"  [Frame {i:02d}] key_id={env.get('key_id', 'N/A')[:18]}  "
+                  f"nonce={env['nonce'][:8]}...  enc={enc_ms:.3f}ms  "
+                  f"invocations={sensor.key_invocations}/{max_key_invocations}")
+            time.sleep(0.15)
+        except Exception as exc:
+            print(f"  [Frame {i:02d}] FAILED: {exc}")
+            break
+
+    time.sleep(0.5)
+    sensor.disconnect()
+    receiver.stop()
+
+    print("\n" + "=" * 78)
+    print("  REKEY DEMONSTRATION SUMMARY")
+    print("=" * 78)
+    auth = [e for e in received_events if e["status"] == "AUTHENTICATED"]
+    print(f"  Frames Published:          {min(i, total_frames)}")
+    print(f"  Frames Authenticated:      {len(auth)}")
+    print(f"  Final Key State:           {sensor._lifecycle.current_state.value}")
+    print(f"  Final Key ID:              {sensor.key_id}")
+    print(f"  Retired Key IDs:           {sensor._lifecycle.retired_key_ids}")
+
+    # DB summary
+    readings = db.get_recent_readings(limit=50)
+    key_ids_in_db = set(r.get("key_id") for r in readings if r.get("key_id"))
+    print(f"  Distinct Key IDs in DB:    {len(key_ids_in_db)} -> {key_ids_in_db}")
+    print("=" * 78)
+
+
 def run_full_pipeline_demo():
     print("=" * 78)
     print("  HYBRID BB84 QKD + AES-256-GCM SECURE IOT PIPELINE (PROTOTYPE DEMO)")

@@ -69,6 +69,13 @@ class SimulatedBroker:
                 self.subscribers[topic] = []
             self.subscribers[topic].append(callback)
 
+    @classmethod
+    def reset_for_testing(cls):
+        """Clear all subscriptions. ONLY for use in automated tests."""
+        with cls._lock:
+            if cls._instance is not None:
+                cls._instance.subscribers.clear()
+
 
 class BaseMQTTClient:
     """Unified interface for both simulated and live MQTT clients."""

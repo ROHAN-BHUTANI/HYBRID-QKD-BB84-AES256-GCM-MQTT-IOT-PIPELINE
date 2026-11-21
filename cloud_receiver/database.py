@@ -101,11 +101,45 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON security_alerts(alert_timestamp)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_alerts_type ON security_alerts(alert_type)")
 
+            # Table 5: Key Lifecycle Events
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS key_lifecycle_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_timestamp TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                state TEXT,
+                key_id TEXT,
+                old_key_id TEXT,
+                new_key_id TEXT,
+                invocation_count INTEGER,
+                threshold INTEGER,
+                qber REAL,
+                pa_output_bits INTEGER,
+                reconciled_bits INTEGER,
+                duration_ms REAL,
+                reason TEXT,
+                details_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_lifecycle_event_type ON key_lifecycle_events(event_type)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_lifecycle_key_id ON key_lifecycle_events(key_id)"
+            )
+
             # --- Migration Check for columns ---
             cursor.execute("PRAGMA table_info(security_alerts)")
             alert_cols = [col["name"] for col in cursor.fetchall()]
             if "severity" not in alert_cols:
                 cursor.execute("ALTER TABLE security_alerts ADD COLUMN severity TEXT DEFAULT 'CRITICAL'")
+
+            # Migration: add key_id column to sensor_readings if absent
+            cursor.execute("PRAGMA table_info(sensor_readings)")
+            reading_cols = [col["name"] for col in cursor.fetchall()]
+            if "key_id" not in reading_cols:
+                cursor.execute("ALTER TABLE sensor_readings ADD COLUMN key_id TEXT DEFAULT NULL")
 
             conn.commit()
 
@@ -145,18 +179,19 @@ class DatabaseManager:
         pressure: Optional[float],
         status: str,
         dec_latency_ms: float,
-        e2e_latency_ms: float
+        e2e_latency_ms: float,
+        key_id: Optional[str] = None,
     ):
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
             INSERT INTO sensor_readings (
                 device_id, reading_id, sensor_timestamp, temperature_c,
-                humidity_percent, pressure_hpa, status, decryption_latency_ms, e2e_latency_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                humidity_percent, pressure_hpa, status, decryption_latency_ms, e2e_latency_ms, key_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 device_id, reading_id, sensor_timestamp, temp,
-                humidity, pressure, status, dec_latency_ms, e2e_latency_ms
+                humidity, pressure, status, dec_latency_ms, e2e_latency_ms, key_id
             ))
             conn.commit()
 
@@ -185,6 +220,48 @@ class DatabaseManager:
                 exec_ms, key_preview
             ))
             conn.commit()
+
+    def log_key_lifecycle_event(self, event: dict):
+        """
+        Persist a structured key lifecycle event to the database.
+        Never stores raw key material — only metadata and identifiers.
+        """
+        import json as _json
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO key_lifecycle_events (
+                event_timestamp, event_type, state, key_id, old_key_id, new_key_id,
+                invocation_count, threshold, qber, pa_output_bits, reconciled_bits,
+                duration_ms, reason, details_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                event.get("timestamp_utc"),
+                event.get("event_type"),
+                event.get("state"),
+                event.get("key_id"),
+                event.get("old_key_id"),
+                event.get("new_key_id"),
+                event.get("invocation_count"),
+                event.get("threshold"),
+                event.get("qber"),
+                event.get("pa_output_bits"),
+                event.get("reconciled_bits"),
+                event.get("duration_ms"),
+                event.get("reason"),
+                _json.dumps({k: v for k, v in event.items()
+                             if k not in ("timestamp_utc", "event_type", "state")}),
+            ))
+            conn.commit()
+
+    def get_lifecycle_events(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Retrieve recent key lifecycle events ordered newest-first."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM key_lifecycle_events ORDER BY id DESC LIMIT ?", (limit,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
     def log_security_alert(self, alert_type: str, details: str, device_id: str, severity: str = "CRITICAL"):
         with self.get_connection() as conn:
