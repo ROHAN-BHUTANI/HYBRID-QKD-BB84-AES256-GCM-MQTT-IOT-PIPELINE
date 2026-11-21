@@ -46,7 +46,11 @@ def test_qkd_to_aes_integration(tmp_path):
         sensor.publish_reading()
         time.sleep(0.05)
 
-    time.sleep(0.2)
+    # Allow worker thread to drain queue
+    for _ in range(40):
+        if len(received_events) >= 3:
+            break
+        time.sleep(0.05)
 
     # 5. Verify reception & DB records
     assert len(received_events) == 3
@@ -58,7 +62,10 @@ def test_qkd_to_aes_integration(tmp_path):
 
     # 6. Test Tampering
     sensor.publish_reading(tamper=True)
-    time.sleep(0.2)
+    for _ in range(40):
+        if len(received_events) >= 4:
+            break
+        time.sleep(0.05)
 
     assert len(received_events) == 4
     assert received_events[-1]["status"] == "TAMPERED"

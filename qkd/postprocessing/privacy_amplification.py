@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 Module A.8: 2-Universal Toeplitz Hash Privacy Amplification (Key Derivation).
-Implements information-theoretic privacy amplification under the Leftover Hash Lemma:
-1. Finite-key entropy calculation using binary Shannon entropy h(QBER)
+Implements privacy amplification under an asymptotic Leftover Hash Lemma engineering formulation:
+1. Entropy estimation using binary Shannon entropy h(QBER) under symmetric channel assumptions
 2. Classical information reconciliation leakage accounting (leak_EC)
-3. Strict finite-key security margin Delta = 2*log2(1/epsilon_sec)
+3. Finite-key engineering safety margin Delta = 2*log2(1/epsilon_sec) (64 bits for epsilon=2^-32)
 4. True 2-universal Toeplitz matrix hashing over GF(2)
-5. Strict entropy enforcement: aborts if secure extractable bits < required key length
+5. Strict entropy enforcement: aborts if extractable bits < required key length
+
+NOTE: This is an asymptotic engineering approximation, NOT a certified composable
+finite-key security proof per Tomamichel et al. (2012).
 """
 import math
 import hashlib
@@ -106,10 +109,12 @@ class PrivacyAmplifier:
         security_parameter_bits: int = 32
     ) -> int:
         """
-        Computes the extractable secret key length according to the finite-key Leftover Hash Lemma:
+        Computes the extractable secret key length according to the asymptotic Leftover Hash Lemma engineering formulation:
         l <= m * [1 - h(QBER)] - leak_EC - 2*log2(1/epsilon_sec)
         
         Here security_parameter_bits represents 2*log2(1/epsilon_sec), e.g. 64 bits for epsilon=2^-32.
+        This provides an engineering estimate under assumed channel symmetry; it does not claim
+        certified composable finite-key security against coherent quantum attacks.
         """
         if reconciled_length <= 0:
             return 0

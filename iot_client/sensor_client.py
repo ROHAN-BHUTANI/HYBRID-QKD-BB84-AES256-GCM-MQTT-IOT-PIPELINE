@@ -50,8 +50,10 @@ class IoTSensorClient:
         bb84_factory: Optional[Callable] = None,
         on_key_rotated: Optional[Callable] = None,
         db_logger: Optional[Callable] = None,
+        experiment_id: Optional[str] = None,
     ):
         self.device_id = device_id
+        self.experiment_id = experiment_id
 
         # Initialize sequence from DB watermark if not explicitly provided
         if initial_seq is None:
@@ -75,6 +77,7 @@ class IoTSensorClient:
             on_key_rotated=on_key_rotated or self._noop_key_rotated,
             max_invocations=max_key_invocations,
             db_logger=db_logger,
+            experiment_id=experiment_id,
         )
 
         # Install the initial key if provided at construction time
@@ -203,6 +206,8 @@ class IoTSensorClient:
 
         # Stamp the key ID on the envelope for receiver correlation
         envelope["key_id"] = self._lifecycle.current_key_id
+        if self.experiment_id:
+            envelope["experiment_id"] = self.experiment_id
 
         # Inject intentional MitM tampering if requested (testing only)
         if tamper:

@@ -14,6 +14,7 @@ import sys
 import os
 import time
 import json
+from typing import Optional, Dict, Any, List
 
 # Ensure UTF-8 output encoding on Windows console
 if hasattr(sys.stdout, "reconfigure"):
@@ -29,7 +30,12 @@ from cloud_receiver.receiver import CloudReceiver
 from cloud_receiver.database import DatabaseManager
 
 
-def run_rekey_demo(max_key_invocations: int = 3, total_frames: int = 8):
+def run_rekey_demo(
+    max_key_invocations: int = 3,
+    total_frames: int = 8,
+    db_path: Optional[str] = None,
+    experiment_id: Optional[str] = None
+) -> dict:
     """
     TSK-01 Demonstration: Autonomous QKD Key Renegotiation.
 
@@ -40,22 +46,31 @@ def run_rekey_demo(max_key_invocations: int = 3, total_frames: int = 8):
     NOTE: This is a software simulation. The receiver learns the new key via the
     same in-process shared-state channel used by the simulated broker transport.
     """
+    exp_id = experiment_id or f"EXP-REKEY-{time.strftime('%Y%m%d%H%M%S')}"
     print("=" * 78)
     print("  TSK-01: AUTONOMOUS QKD KEY RENEGOTIATION DEMONSTRATION")
+    print(f"  Experiment ID:        {exp_id}")
     print(f"  Key invocation limit: {max_key_invocations} frames per key")
     print(f"  Total frames to publish: {total_frames}")
+    if db_path:
+        print(f"  Database (Isolated):  {db_path}")
     print("=" * 78)
 
-    db = DatabaseManager()
+    from broker.broker_bridge import SimulatedBroker
+    SimulatedBroker.reset_for_testing()
+
+    db = DatabaseManager(db_path=db_path) if db_path else DatabaseManager()
 
     # Initial BB84 session
     print(f"\n[REKEY DEMO] Running initial BB84 QKD session ({config.NUM_QUBITS} qubits)...")
     sim = BB84Simulator()
+    t_qkd0 = time.perf_counter()
     initial_result = sim.run(num_qubits=config.NUM_QUBITS, enable_eve=False)
+    initial_qkd_ms = (time.perf_counter() - t_qkd0) * 1000.0
 
     if not initial_result.is_valid or not initial_result.alice_key:
         print("[REKEY DEMO] Initial QKD session failed. Aborting demo.")
-        return
+        return {"status": "FAILED", "reason": "Initial QKD failed"}
 
     print(f"  -> Initial key established. QBER={initial_result.qber*100:.2f}%")
 
@@ -73,9 +88,17 @@ def run_rekey_demo(max_key_invocations: int = 3, total_frames: int = 8):
     receiver._active_key_id = "INITIAL"
     receiver.start()
 
+    qkd_transitions = []
+
     def on_key_rotated(new_key_id, new_key_bytes, session_meta):
         """Receiver learns new key when lifecycle manager rotates it."""
         receiver.rotate_key(new_key_id, new_key_bytes, session_meta)
+        qkd_transitions.append({
+            "key_id": new_key_id,
+            "qber": session_meta.get("qber", 0.0),
+            "pa_output_bits": session_meta.get("pa_output_bits", 0),
+            "duration_ms": session_meta.get("execution_time_ms", 0.0),
+        })
         print(f"\n  [REKEY DEMO] >> Receiver key rotated to {new_key_id}")
         print(f"  [REKEY DEMO]    QBER={session_meta.get('qber', 0.0)*100:.2f}%  "
               f"PA output={session_meta.get('pa_output_bits', 0)} bits\n")
@@ -89,6 +112,7 @@ def run_rekey_demo(max_key_invocations: int = 3, total_frames: int = 8):
             eve_present=False,
             exec_ms=session_meta.get("execution_time_ms", 0.0),
             key_preview=new_key_id,
+            experiment_id=exp_id,
         )
 
     sensor = IoTSensorClient(
@@ -98,13 +122,35 @@ def run_rekey_demo(max_key_invocations: int = 3, total_frames: int = 8):
         max_key_invocations=max_key_invocations,
         on_key_rotated=on_key_rotated,
         db_logger=db.log_key_lifecycle_event,
+        experiment_id=exp_id,
+    )
+    # Log initial key QKD session with initial key ID
+    db.log_qkd_session(
+        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        num_qubits=initial_result.num_qubits,
+        sifted_len=initial_result.reconciled_length,
+        qber=initial_result.qber,
+        threshold=config.QBER_THRESHOLD,
+        is_valid=initial_result.is_valid,
+        eve_present=False,
+        exec_ms=initial_qkd_ms,
+        key_preview=sensor.key_id,
+        experiment_id=exp_id,
     )
     sensor.connect()
     print(f"\n[REKEY DEMO] Publishing {total_frames} frames with limit={max_key_invocations}...\n")
 
+    published_frames = []
     for i in range(1, total_frames + 1):
         try:
             env, enc_ms = sensor.publish_reading()
+            published_frames.append({
+                "frame_no": i,
+                "key_id": env.get("key_id"),
+                "nonce": env.get("nonce"),
+                "enc_ms": enc_ms,
+                "invocations": sensor.key_invocations,
+            })
             print(f"  [Frame {i:02d}] key_id={env.get('key_id', 'N/A')[:18]}  "
                   f"nonce={env['nonce'][:8]}...  enc={enc_ms:.3f}ms  "
                   f"invocations={sensor.key_invocations}/{max_key_invocations}")
@@ -113,7 +159,12 @@ def run_rekey_demo(max_key_invocations: int = 3, total_frames: int = 8):
             print(f"  [Frame {i:02d}] FAILED: {exc}")
             break
 
-    time.sleep(0.5)
+    # Allow worker thread to drain queue
+    for _ in range(30):
+        if len(received_events) >= total_frames:
+            break
+        time.sleep(0.05)
+
     sensor.disconnect()
     receiver.stop()
 
@@ -121,17 +172,33 @@ def run_rekey_demo(max_key_invocations: int = 3, total_frames: int = 8):
     print("  REKEY DEMONSTRATION SUMMARY")
     print("=" * 78)
     auth = [e for e in received_events if e["status"] == "AUTHENTICATED"]
-    print(f"  Frames Published:          {min(i, total_frames)}")
+    print(f"  Experiment ID:             {exp_id}")
+    print(f"  Frames Published:          {len(published_frames)}")
     print(f"  Frames Authenticated:      {len(auth)}")
     print(f"  Final Key State:           {sensor._lifecycle.current_state.value}")
     print(f"  Final Key ID:              {sensor.key_id}")
     print(f"  Retired Key IDs:           {sensor._lifecycle.retired_key_ids}")
 
-    # DB summary
-    readings = db.get_recent_readings(limit=50)
-    key_ids_in_db = set(r.get("key_id") for r in readings if r.get("key_id"))
+    # Query DB explicitly for this experiment (or all rows if fresh DB)
+    readings = db.get_readings_by_experiment(exp_id)
+    if not readings:
+        readings = db.get_recent_readings(limit=total_frames + 5)
+    key_ids_in_db = sorted(list(set(r.get("key_id") for r in readings if r.get("key_id"))))
     print(f"  Distinct Key IDs in DB:    {len(key_ids_in_db)} -> {key_ids_in_db}")
     print("=" * 78)
+
+    return {
+        "experiment_id": exp_id,
+        "frames_published": len(published_frames),
+        "frames_authenticated": len(auth),
+        "final_state": sensor._lifecycle.current_state.value,
+        "distinct_key_count": len(key_ids_in_db),
+        "key_ids": key_ids_in_db,
+        "retired_keys": list(sensor._lifecycle.retired_key_ids),
+        "published_frames": published_frames,
+        "received_events": received_events,
+        "readings_in_db": readings,
+    }
 
 
 def run_full_pipeline_demo():

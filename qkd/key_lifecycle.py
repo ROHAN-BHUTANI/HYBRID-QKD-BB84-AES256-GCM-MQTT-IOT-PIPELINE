@@ -80,11 +80,13 @@ class KeyLifecycleManager:
         on_key_rotated: Callable,
         max_invocations: int = 100_000,
         db_logger: Optional[Callable[[Dict[str, Any]], None]] = None,
+        experiment_id: Optional[str] = None,
     ):
         self._bb84_factory = bb84_factory
         self._on_key_rotated = on_key_rotated
         self._max_invocations = max_invocations
         self._db_logger = db_logger
+        self.experiment_id = experiment_id
 
         self._lock = threading.Lock()
         self._rekey_complete = threading.Event()
@@ -316,6 +318,7 @@ class KeyLifecycleManager:
             "event_type": event_type,
             "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "state": self.state.value if hasattr(self.state, 'value') else str(self.state),
+            "experiment_id": self.experiment_id,
             **details,
         }
         self.lifecycle_events.append(event)

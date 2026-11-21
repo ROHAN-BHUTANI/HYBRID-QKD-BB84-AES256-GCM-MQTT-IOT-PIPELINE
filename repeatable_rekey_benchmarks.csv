@@ -1,0 +1,6 @@
+run_index,experiment_id,db_path,total_frames_published,total_frames_authenticated,total_frames_failed,distinct_key_count,key_gen_1,key_gen_2,key_gen_3,gen1_consistent,gen2_consistent,gen3_consistent,generations_mutually_distinct,all_authenticated,qkd_session_count,lifecycle_event_count,avg_decryption_ms,total_run_duration_sec,status
+1,EXP-REPRO-RUN01-1795246561,C:\Users\bhuta\AppData\Local\Temp\rekey_demo_run_1.db,8,8,0,3,KID-B27B2B790F7C,KID-F86E60223C7F,KID-E55DE41EF0F8,True,True,True,True,True,3,9,0.148,19.76,PASS
+2,EXP-REPRO-RUN02-1795246581,C:\Users\bhuta\AppData\Local\Temp\rekey_demo_run_2.db,8,8,0,3,KID-9FA7D11B3436,KID-A878A5377FE2,KID-70B64017EEFD,True,True,True,True,True,3,9,0.07,6.06,PASS
+3,EXP-REPRO-RUN03-1795246587,C:\Users\bhuta\AppData\Local\Temp\rekey_demo_run_3.db,8,8,0,3,KID-80B05C2444FD,KID-1B4A09990429,KID-327305D5DC52,True,True,True,True,True,3,9,0.03,5.98,PASS
+4,EXP-REPRO-RUN04-1795246593,C:\Users\bhuta\AppData\Local\Temp\rekey_demo_run_4.db,8,8,0,3,KID-C072012ACF9C,KID-8670BF8C9078,KID-34A0C029E0A1,True,True,True,True,True,3,9,0.052,6.97,PASS
+5,EXP-REPRO-RUN05-1795246600,C:\Users\bhuta\AppData\Local\Temp\rekey_demo_run_5.db,8,8,0,3,KID-CEC8025B8D00,KID-970EBFE6A90D,KID-1AF6CAC49188,True,True,True,True,True,3,9,0.05,5.43,PASS

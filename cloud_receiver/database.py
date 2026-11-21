@@ -135,11 +135,23 @@ class DatabaseManager:
             if "severity" not in alert_cols:
                 cursor.execute("ALTER TABLE security_alerts ADD COLUMN severity TEXT DEFAULT 'CRITICAL'")
 
-            # Migration: add key_id column to sensor_readings if absent
+            # Migration: add key_id and experiment_id columns if absent
             cursor.execute("PRAGMA table_info(sensor_readings)")
             reading_cols = [col["name"] for col in cursor.fetchall()]
             if "key_id" not in reading_cols:
                 cursor.execute("ALTER TABLE sensor_readings ADD COLUMN key_id TEXT DEFAULT NULL")
+            if "experiment_id" not in reading_cols:
+                cursor.execute("ALTER TABLE sensor_readings ADD COLUMN experiment_id TEXT DEFAULT NULL")
+
+            cursor.execute("PRAGMA table_info(key_lifecycle_events)")
+            lifecycle_cols = [col["name"] for col in cursor.fetchall()]
+            if "experiment_id" not in lifecycle_cols:
+                cursor.execute("ALTER TABLE key_lifecycle_events ADD COLUMN experiment_id TEXT DEFAULT NULL")
+
+            cursor.execute("PRAGMA table_info(qkd_sessions)")
+            qkd_cols = [col["name"] for col in cursor.fetchall()]
+            if "experiment_id" not in qkd_cols:
+                cursor.execute("ALTER TABLE qkd_sessions ADD COLUMN experiment_id TEXT DEFAULT NULL")
 
             conn.commit()
 
@@ -181,17 +193,18 @@ class DatabaseManager:
         dec_latency_ms: float,
         e2e_latency_ms: float,
         key_id: Optional[str] = None,
+        experiment_id: Optional[str] = None,
     ):
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
             INSERT INTO sensor_readings (
                 device_id, reading_id, sensor_timestamp, temperature_c,
-                humidity_percent, pressure_hpa, status, decryption_latency_ms, e2e_latency_ms, key_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                humidity_percent, pressure_hpa, status, decryption_latency_ms, e2e_latency_ms, key_id, experiment_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 device_id, reading_id, sensor_timestamp, temp,
-                humidity, pressure, status, dec_latency_ms, e2e_latency_ms, key_id
+                humidity, pressure, status, dec_latency_ms, e2e_latency_ms, key_id, experiment_id
             ))
             conn.commit()
 
@@ -205,19 +218,20 @@ class DatabaseManager:
         is_valid: bool,
         eve_present: bool,
         exec_ms: float,
-        key_preview: str = ""
+        key_preview: str = "",
+        experiment_id: Optional[str] = None,
     ):
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
             INSERT INTO qkd_sessions (
                 session_timestamp, num_qubits, sifted_length, qber,
-                threshold, is_valid, eve_present, execution_time_ms, key_preview
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                threshold, is_valid, eve_present, execution_time_ms, key_preview, experiment_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, num_qubits, sifted_len, qber,
                 threshold, 1 if is_valid else 0, 1 if eve_present else 0,
-                exec_ms, key_preview
+                exec_ms, key_preview, experiment_id
             ))
             conn.commit()
 
@@ -233,8 +247,8 @@ class DatabaseManager:
             INSERT INTO key_lifecycle_events (
                 event_timestamp, event_type, state, key_id, old_key_id, new_key_id,
                 invocation_count, threshold, qber, pa_output_bits, reconciled_bits,
-                duration_ms, reason, details_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration_ms, reason, details_json, experiment_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 event.get("timestamp_utc"),
                 event.get("event_type"),
@@ -250,9 +264,37 @@ class DatabaseManager:
                 event.get("duration_ms"),
                 event.get("reason"),
                 _json.dumps({k: v for k, v in event.items()
-                             if k not in ("timestamp_utc", "event_type", "state")}),
+                             if k not in ("timestamp_utc", "event_type", "state", "experiment_id")}),
+                event.get("experiment_id"),
             ))
             conn.commit()
+
+    def get_readings_by_experiment(self, experiment_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all sensor readings for a specific experiment ID."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM sensor_readings WHERE experiment_id = ? ORDER BY id ASC", (experiment_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_lifecycle_events_by_experiment(self, experiment_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all lifecycle events for a specific experiment ID."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM key_lifecycle_events WHERE experiment_id = ? ORDER BY id ASC", (experiment_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_qkd_sessions_by_experiment(self, experiment_id: str) -> List[Dict[str, Any]]:
+        """Retrieve all QKD sessions for a specific experiment ID."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM qkd_sessions WHERE experiment_id = ? ORDER BY id ASC", (experiment_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
     def get_lifecycle_events(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Retrieve recent key lifecycle events ordered newest-first."""

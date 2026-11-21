@@ -81,6 +81,7 @@ class CloudReceiver:
         self._active_key_id: Optional[str] = None
         self._key_lock = threading.Lock()
         self._previous_keys: list = []  # Inbound rollover window for in-flight packets
+        self._unpersisted_buffer: list = []  # Safe in-memory retention buffer when DB write fails
 
     def set_key(self, key: bytes):
         """Sets the shared AES-256 key established via BB84 QKD."""
@@ -137,6 +138,7 @@ class CloudReceiver:
         device_id = envelope.get("device_id", "UNKNOWN_DEVICE")
         # Read envelope key_id stamped by sensor client (informational only)
         envelope_key_id = envelope.get("key_id")
+        experiment_id = envelope.get("experiment_id")
 
         with self._key_lock:
             current_key = self.aes_key
@@ -181,49 +183,84 @@ class CloudReceiver:
                 if not is_fresh:
                     # Replay attack detected! Sequence number has already been seen or is stale
                     print(f"[SECURITY ALERT] Replay attack detected from {device_id}! Reason: {replay_reason}.")
-                    self.db.log_security_alert(
-                        alert_type="REPLAY_ATTACK",
-                        details=f"Sequence number #{reading_id} rejected: {replay_reason}.",
-                        device_id=device_id,
-                        severity="HIGH"
-                    )
-                    self.db.log_sensor_reading(
-                        device_id=device_id,
-                        reading_id=reading_id,
-                        sensor_timestamp=sensor_ts,
-                        temp=temp,
-                        humidity=humidity,
-                        pressure=pressure,
-                        status="REPLAY_REJECTED",
-                        dec_latency_ms=dec_latency_ms,
-                        e2e_latency_ms=e2e_latency_ms,
-                        key_id=envelope_key_id,
-                    )
+                    try:
+                        self.db.log_security_alert(
+                            alert_type="REPLAY_ATTACK",
+                            details=f"Sequence number #{reading_id} rejected: {replay_reason}.",
+                            device_id=device_id,
+                            severity="HIGH"
+                        )
+                        self.db.log_sensor_reading(
+                            device_id=device_id,
+                            reading_id=reading_id,
+                            sensor_timestamp=sensor_ts,
+                            temp=temp,
+                            humidity=humidity,
+                            pressure=pressure,
+                            status="REPLAY_REJECTED",
+                            dec_latency_ms=dec_latency_ms,
+                            e2e_latency_ms=e2e_latency_ms,
+                            key_id=envelope_key_id,
+                            experiment_id=experiment_id,
+                        )
+                    except Exception as db_replay_err:
+                        print(f"[CloudReceiver Persistence Error] Replay alert DB write failed: {db_replay_err}")
+
                     if self.on_message_callback:
                         self.on_message_callback({
                             "status": "REPLAY_REJECTED",
                             "device_id": device_id,
                             "reading_id": reading_id,
-                            "e2e_latency_ms": e2e_latency_ms
+                            "e2e_latency_ms": e2e_latency_ms,
+                            "experiment_id": experiment_id,
                         })
                     return
 
                 # Record watermark in database
-                self.db.update_device_sequence(device_id, reading_id)
+                try:
+                    self.db.update_device_sequence(device_id, reading_id)
+                except Exception as seq_err:
+                    print(f"[CloudReceiver Persistence Error] Watermark DB update failed: {seq_err}")
 
-            # Successfully authenticated & fresh reading
-            self.db.log_sensor_reading(
-                device_id=device_id,
-                reading_id=reading_id,
-                sensor_timestamp=sensor_ts,
-                temp=temp,
-                humidity=humidity,
-                pressure=pressure,
-                status="AUTHENTICATED",
-                dec_latency_ms=dec_latency_ms,
-                e2e_latency_ms=e2e_latency_ms,
-                key_id=envelope_key_id,
-            )
+            # Attempt database persistence for authenticated reading
+            try:
+                self.db.log_sensor_reading(
+                    device_id=device_id,
+                    reading_id=reading_id,
+                    sensor_timestamp=sensor_ts,
+                    temp=temp,
+                    humidity=humidity,
+                    pressure=pressure,
+                    status="AUTHENTICATED",
+                    dec_latency_ms=dec_latency_ms,
+                    e2e_latency_ms=e2e_latency_ms,
+                    key_id=envelope_key_id,
+                    experiment_id=experiment_id,
+                )
+            except Exception as db_err:
+                # SQLite write failed: buffer telemetry safely and explicitly mark persistence failure
+                print(f"[CloudReceiver Persistence Error] Sensor reading DB write failed: {db_err}")
+                self._unpersisted_buffer.append({
+                    "device_id": device_id,
+                    "reading_id": reading_id,
+                    "data": decrypted_data,
+                    "status": "PERSISTENCE_FAILED",
+                    "error": str(db_err),
+                    "key_id": envelope_key_id,
+                    "experiment_id": experiment_id,
+                })
+                if self.on_message_callback:
+                    self.on_message_callback({
+                        "status": "PERSISTENCE_FAILED",
+                        "error": str(db_err),
+                        "device_id": device_id,
+                        "reading_id": reading_id,
+                        "data": decrypted_data,
+                        "e2e_latency_ms": e2e_latency_ms,
+                        "key_id": envelope_key_id,
+                        "experiment_id": experiment_id,
+                    })
+                return
 
             if self.on_message_callback:
                 self.on_message_callback({
@@ -232,30 +269,35 @@ class CloudReceiver:
                     "dec_latency_ms": dec_latency_ms,
                     "e2e_latency_ms": e2e_latency_ms,
                     "key_id": envelope_key_id,
+                    "experiment_id": experiment_id,
                 })
 
         except InvalidTag:
             # Authentication tag mismatch: tampering detected!
             dec_latency_ms = 0.0
             print(f"[SECURITY ALERT] Tampering detected in message from {device_id}!")
-            self.db.log_security_alert(
-                alert_type="INTEGRITY_VIOLATION",
-                details="AES-256-GCM authentication tag mismatch. Ciphertext or nonce modified in transit.",
-                device_id=device_id,
-                severity="CRITICAL"
-            )
-            self.db.log_sensor_reading(
-                device_id=device_id,
-                reading_id=None,
-                sensor_timestamp="",
-                temp=None,
-                humidity=None,
-                pressure=None,
-                status="TAMPERED",
-                dec_latency_ms=dec_latency_ms,
-                e2e_latency_ms=e2e_latency_ms,
-                key_id=envelope_key_id,
-            )
+            try:
+                self.db.log_security_alert(
+                    alert_type="INTEGRITY_VIOLATION",
+                    details="AES-256-GCM authentication tag mismatch. Ciphertext or nonce modified in transit.",
+                    device_id=device_id,
+                    severity="CRITICAL"
+                )
+                self.db.log_sensor_reading(
+                    device_id=device_id,
+                    reading_id=None,
+                    sensor_timestamp="",
+                    temp=None,
+                    humidity=None,
+                    pressure=None,
+                    status="TAMPERED",
+                    dec_latency_ms=dec_latency_ms,
+                    e2e_latency_ms=e2e_latency_ms,
+                    key_id=envelope_key_id,
+                    experiment_id=experiment_id,
+                )
+            except Exception as db_tamper_err:
+                print(f"[CloudReceiver Persistence Error] Tamper alert DB write failed: {db_tamper_err}")
 
             if self.on_message_callback:
                 self.on_message_callback({

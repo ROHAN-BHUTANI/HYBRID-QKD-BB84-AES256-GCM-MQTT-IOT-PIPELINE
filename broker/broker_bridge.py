@@ -69,6 +69,11 @@ class SimulatedBroker:
                 self.subscribers[topic] = []
             self.subscribers[topic].append(callback)
 
+    def unsubscribe(self, topic: str, callback: Callable[[str, str], None]):
+        with self._lock:
+            if topic in self.subscribers and callback in self.subscribers[topic]:
+                self.subscribers[topic].remove(callback)
+
     @classmethod
     def reset_for_testing(cls):
         """Clear all subscriptions. ONLY for use in automated tests."""
@@ -98,6 +103,7 @@ class LocalSimulatedClient(BaseMQTTClient):
         self.client_id = client_id
         self.broker = SimulatedBroker()
         self.connected = False
+        self._subscriptions: List[tuple] = []
 
     def connect(self):
         self.connected = True
@@ -105,6 +111,9 @@ class LocalSimulatedClient(BaseMQTTClient):
 
     def disconnect(self):
         self.connected = False
+        for topic, callback in self._subscriptions:
+            self.broker.unsubscribe(topic, callback)
+        self._subscriptions.clear()
 
     def publish(self, topic: str, payload: str):
         if not self.connected:
@@ -115,6 +124,7 @@ class LocalSimulatedClient(BaseMQTTClient):
         if not self.connected:
             raise ConnectionError("Client is not connected.")
         self.broker.subscribe(topic, callback)
+        self._subscriptions.append((topic, callback))
 
 
 class PahoLiveClient(BaseMQTTClient):

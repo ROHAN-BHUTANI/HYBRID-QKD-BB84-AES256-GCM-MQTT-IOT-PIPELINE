@@ -237,6 +237,46 @@ class TestKeyInstallationAndReceiverSync:
         sensor.disconnect()
         receiver.stop()
 
+    def test_receiver_sync_failure_rejects_as_tampered(self, test_db):
+        """When receiver fails to synchronize to new key, post-rekey frames are rejected as TAMPERED."""
+        received_events = []
+        receiver = CloudReceiver(
+            aes_key=_make_key(),
+            db_manager=test_db,
+            on_message_callback=lambda ev: received_events.append(ev),
+        )
+        receiver._active_key_id = "OLD-KEY"
+        receiver.start()
+
+        # Simulate synchronization failure: on_key_rotated callback is a no-op, receiver NEVER learns the new key
+        sensor = IoTSensorClient(
+            device_id="TEST-SYNC-FAIL",
+            aes_key=receiver.aes_key,
+            initial_seq=0,
+            max_key_invocations=2,
+            bb84_factory=lambda: (_make_key(), {"qber": 0.0, "pa_output_bits": 256, "is_valid": True}),
+            on_key_rotated=lambda kid, k, m: None,  # Intentionally drop rotation callback
+        )
+        sensor.connect()
+
+        # First 2 succeed under initial shared key
+        sensor.publish_reading()
+        sensor.publish_reading()
+
+        # 3rd frame rotates key on sensor, but receiver was NOT rotated
+        sensor.publish_reading()
+
+        # Wait for receiver
+        for _ in range(20):
+            tampered = [e for e in received_events if e["status"] == "TAMPERED"]
+            if tampered:
+                break
+            time.sleep(0.05)
+
+        assert len(tampered) >= 1, "Unsynchronized receiver must reject post-rekey frame as TAMPERED"
+        sensor.disconnect()
+        receiver.stop()
+
 
 # ===========================================================================
 # CRITERION 6: Old key retirement
@@ -387,6 +427,36 @@ class TestRekeyFailure:
 
         # State should be terminal
         assert sensor._lifecycle.current_state in (KeyState.SECURITY_ABORT, KeyState.KEY_EXPIRED)
+        sensor.disconnect()
+
+    def test_privacy_amplification_failure_blocks_rekey(self):
+        """When privacy amplification returns insufficient entropy (None key), state=SECURITY_ABORT."""
+        def pa_failing_factory():
+            # Returns None key simulating Toeplitz hash failure / insufficient entropy
+            return None, {
+                "qber": 0.02,
+                "is_valid": False,
+                "reconciled_bits": 50,
+                "pa_output_bits": 0,
+                "reason": "Insufficient entropy for 256-bit key"
+            }
+
+        sensor = IoTSensorClient(
+            device_id="TEST-PA-FAIL",
+            aes_key=_make_key(),
+            initial_seq=0,
+            max_key_invocations=2,
+            bb84_factory=pa_failing_factory,
+            on_key_rotated=lambda k, b, m: None,
+        )
+        sensor.connect()
+        sensor.publish_reading()
+        sensor.publish_reading()
+
+        with pytest.raises((RekeyFailedError, KeyExpirationError)):
+            sensor.publish_reading()
+
+        assert sensor._lifecycle.current_state == KeyState.SECURITY_ABORT
         sensor.disconnect()
 
     def test_qber_abort_raises_and_blocks_encryption(self):
@@ -644,11 +714,13 @@ class TestReplayProtectionAcrossRotation:
 
         # Replay old envelope (same reading_id, old nonce)
         sensor.mqtt_client.publish(config.MQTT_TOPIC_DATA, saved_payload)
-        time.sleep(0.3)
+        for _ in range(20):
+            replay_events = [e for e in received_events
+                             if e["status"] in ("REPLAY_REJECTED", "TAMPERED")]
+            if replay_events:
+                break
+            time.sleep(0.05)
 
-        # Look for REPLAY_REJECTED or TAMPERED event
-        replay_events = [e for e in received_events
-                         if e["status"] in ("REPLAY_REJECTED", "TAMPERED")]
         assert len(replay_events) >= 1, \
             "Replayed pre-rotation envelope was not rejected"
 
@@ -707,6 +779,64 @@ class TestAuthFailureUnderNewKey:
         assert len(tampered) >= 1, \
             "Tampered post-rekey frame was not detected and rejected"
 
+        sensor.disconnect()
+        receiver.stop()
+
+    def test_auth_tag_tampering_rejected_post_rekey(self, test_db):
+        """Authentication tag tampering on post-rekey frame is caught and marked TAMPERED."""
+        import base64
+        received_events = []
+        new_key_holder = {"key": None}
+
+        def factory():
+            k = _make_key()
+            new_key_holder["key"] = k
+            return k, {"qber": 0.0, "pa_output_bits": 256, "is_valid": True}
+
+        initial_key = _make_key()
+        receiver = CloudReceiver(
+            aes_key=initial_key,
+            db_manager=test_db,
+            on_message_callback=lambda ev: received_events.append(ev),
+        )
+        receiver.start()
+
+        def on_rotated(kid, k, m):
+            receiver.rotate_key(kid, k, m)
+
+        sensor = IoTSensorClient(
+            device_id="TEST-TAG-TAMP",
+            aes_key=initial_key,
+            initial_seq=0,
+            max_key_invocations=2,
+            bb84_factory=factory,
+            on_key_rotated=on_rotated,
+        )
+        sensor.connect()
+
+        # 2 frames to threshold
+        sensor.publish_reading()
+        sensor.publish_reading()
+
+        # 3rd frame triggers rekey
+        env, _ = sensor.publish_reading()
+
+        # Tamper the 16-byte authentication tag
+        tag_bytes = bytearray(base64.b64decode(env["tag"]))
+        tag_bytes[0] ^= 0xFF
+        env["tag"] = base64.b64encode(tag_bytes).decode("utf-8")
+
+        # Publish tampered tag envelope
+        import json
+        sensor.mqtt_client.publish(config.MQTT_TOPIC_DATA, json.dumps(env))
+
+        for _ in range(20):
+            tampered = [e for e in received_events if e["status"] == "TAMPERED"]
+            if tampered:
+                break
+            time.sleep(0.05)
+
+        assert len(tampered) >= 1, "Tampered authentication tag was not rejected"
         sensor.disconnect()
         receiver.stop()
 
@@ -803,6 +933,47 @@ class TestLifecycleEventPersistence:
         sensor.disconnect()
         receiver.stop()
 
+    def test_sqlite_write_failure_buffers_and_marks_persistence_failed(self, test_db, monkeypatch):
+        """When SQLite write raises OperationalError, receiver buffers frame and emits PERSISTENCE_FAILED."""
+        import sqlite3
+        received_events = []
+        key = _make_key()
+        receiver = CloudReceiver(
+            aes_key=key,
+            db_manager=test_db,
+            on_message_callback=lambda ev: received_events.append(ev),
+        )
+        receiver.start()
+
+        def failing_log_sensor_reading(*args, **kwargs):
+            raise sqlite3.OperationalError("database disk image is malformed / disk full")
+
+        monkeypatch.setattr(test_db, "log_sensor_reading", failing_log_sensor_reading)
+
+        sensor = IoTSensorClient(
+            device_id="TEST-DB-FAIL",
+            aes_key=key,
+            initial_seq=0,
+            max_key_invocations=10,
+        )
+        sensor.connect()
+        sensor.publish_reading()
+
+        for _ in range(20):
+            if received_events:
+                break
+            time.sleep(0.05)
+
+        assert len(received_events) >= 1
+        ev = received_events[0]
+        assert ev["status"] == "PERSISTENCE_FAILED"
+        assert "disk full" in ev["error"] or "malformed" in ev["error"]
+        assert len(receiver._unpersisted_buffer) >= 1
+        assert receiver._unpersisted_buffer[0]["reading_id"] == 1
+
+        sensor.disconnect()
+        receiver.stop()
+
 
 # ===========================================================================
 # Full E2E lifecycle with real BB84 (slow; mark explicitly)
@@ -868,3 +1039,31 @@ class TestFullBB84RekeyIntegration:
 
         sensor.disconnect()
         receiver.stop()
+
+
+# ===========================================================================
+# CRITERION: Message queue / broker failure handling
+# ===========================================================================
+
+class TestBrokerQueueFailure:
+    def test_broker_queue_failure_raises_and_preserves_state(self, monkeypatch):
+        """When broker publish fails with ConnectionError, exception is raised to caller and state is preserved."""
+        sensor = IoTSensorClient(
+            device_id="TEST-BROKER-FAIL",
+            aes_key=_make_key(),
+            initial_seq=0,
+            max_key_invocations=5,
+        )
+        sensor.connect()
+
+        def failing_publish(topic, payload):
+            raise ConnectionError("Broker connection reset by peer")
+
+        monkeypatch.setattr(sensor.mqtt_client, "publish", failing_publish)
+
+        # Attempt to publish must raise ConnectionError — never silently swallow
+        with pytest.raises(ConnectionError):
+            sensor.publish_reading()
+
+        assert sensor._lifecycle.current_state == KeyState.ACTIVE
+        sensor.disconnect()
